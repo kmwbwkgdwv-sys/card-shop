@@ -383,6 +383,7 @@ export class Sfx {
       case 'rare': [784, 988, 1175, 1568].forEach((f, i) => tone(f, i * 0.07, 0.35, 'triangle', 0.14)); noise(0, 0.5, 0.05, 8000); break;
       case 'ultra': [523, 659, 784, 1046, 1318, 1568, 2093].forEach((f, i) => tone(f, i * 0.06, 0.5, 'triangle', 0.13)); [1046, 1318, 1568].forEach((f) => tone(f, 0.5, 1.1, 'sine', 0.1)); noise(0, 0.9, 0.06, 9000); break;
       case 'boxclose': noise(0, 0.1, 0.12, 1500); tone(200, 0, 0.1, 'triangle', 0.18, 140); break;
+      case 'spray': noise(0, 0.32, 0.16, 5200); noise(0.02, 0.26, 0.1, 9000); break;
       case 'drop': tone(700, 0, 0.5, 'sine', 0.06, 300); tone(110, 0.7, 0.18, 'triangle', 0.3, 60); noise(0.7, 0.18, 0.18, 300); tone(95, 0.95, 0.14, 'triangle', 0.22, 55); noise(0.95, 0.14, 0.12, 300); break;
       default: break;
     }

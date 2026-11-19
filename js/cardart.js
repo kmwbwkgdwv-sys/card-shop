@@ -6,7 +6,7 @@
 //  SSR … 色ちがいのキャラ×星空のスペシャルアート（銀のグリッター）
 //  HR  … SSR をレインボー加工（キャラも背景も虹色）
 //  UR  … SSR をゴールド加工（金の枠・金色のキャラ・金のグリッター）
-import { CARDS, SERIES_BY, TYPE_COLOR, TYPE_JA, RARITY } from './cards.js';
+import { CARDS, SERIES_BY, TYPE_COLOR, TYPE_JA, RARITY, BOX_PACKS } from './cards.js';
 
 export const DISP = '"Dela Gothic One","M PLUS Rounded 1c","Hiragino Maru Gothic ProN",sans-serif';
 export const BODY = '"M PLUS Rounded 1c","Hiragino Maru Gothic ProN","Hiragino Sans","Noto Sans JP",sans-serif';
@@ -569,44 +569,114 @@ function crimp(c, x, y, w, h, dir) {
   for (let i = 0; i <= n; i++) c.lineTo(x + i / n * w, y + (i % 2 ? (dir > 0 ? h : 0) : (dir > 0 ? 0 : h)));
   c.lineTo(x + w, y + (dir > 0 ? h : 0)); c.lineTo(x + w, y + (dir > 0 ? 0 : h)); c.closePath();
 }
+// ギザギザの星形（「5枚入り」バッジ）
+function burst(c, x, y, r0, r1, n, rot = 0) {
+  c.beginPath();
+  for (let i = 0; i < n * 2; i++) { const a = rot + i / (n * 2) * Math.PI * 2, r = i % 2 ? r0 : r1; c.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r); }
+  c.closePath();
+}
+// 六角形のもよう（ホログラムの地紋）
+function hexes(c, x, y, w, h, s, col, a) {
+  c.save(); c.globalAlpha = a; c.strokeStyle = col; c.lineWidth = Math.max(1, s * 0.08);
+  const dx = s * 1.5, dy = s * Math.sqrt(3);
+  for (let j = -1; j * dy / 2 < h + dy; j++) for (let i = -1; i * dx < w + dx; i++) {
+    const cx = x + i * dx, cy = y + j * dy / 2 + (i % 2 ? dy / 4 : -dy / 4);
+    if ((i + j) % 2) continue;
+    c.beginPath(); for (let k = 0; k < 6; k++) { const an = k / 6 * Math.PI * 2; c.lineTo(cx + Math.cos(an) * s * 0.92, cy + Math.sin(an) * s * 0.92); } c.closePath(); c.stroke();
+  }
+  c.restore();
+}
 export function drawPack(c, sid, W, H, img, img2) {
   const se = SERIES_BY[sid], u = W / 300, col = se.color, col2 = se.color2;
   c.save(); c.clearRect(0, 0, W, H);
-  const cz = 22 * u; // ギザギザの高さ
-  // 本体
+  const cz = 24 * u; // ギザギザの高さ
+  const ink = darken(col, 0.62);
+  // ---- 本体：メタリックな地＋ホログラムの地紋 ----
   c.save(); c.beginPath(); c.rect(0, cz * 0.6, W, H - cz * 1.2); c.clip();
-  const g = c.createLinearGradient(0, 0, W, H); g.addColorStop(0, lighten(col, 0.25)); g.addColorStop(0.5, col); g.addColorStop(1, darken(col, 0.45));
+  const g = c.createLinearGradient(0, 0, W * 0.4, H); g.addColorStop(0, lighten(col, 0.32)); g.addColorStop(0.45, col); g.addColorStop(1, darken(col, 0.5));
   c.fillStyle = g; c.fillRect(0, 0, W, H);
-  rays(c, W / 2, H * 0.52, 30, 10 * u, H, lighten(col2, 0.3), 0.22, sid * 99);
-  bokeh(c, 0, 0, W, H, 14, col2, sid * 7, 50 * u);
-  glitter(c, 0, 0, W, H, 260, ['#ffffff', lighten(col2, 0.5)], sid * 13, 1.6 * u);
-  if (img2) { c.save(); c.globalAlpha = 0.55; drawChar(c, img2, W * 0.73, H * 0.62, W * 0.62, H * 0.32, u); c.restore(); }
-  drawChar(c, img, W * 0.47, H * 0.76, W * 0.95, H * 0.48, u, { glow: rgba(lighten(col2, 0.5), 0.95), glowR: 16 * u });
-  // 光沢の斜めの帯
-  const sh = c.createLinearGradient(0, 0, W, H * 0.6); sh.addColorStop(0.3, 'rgba(255,255,255,0)'); sh.addColorStop(0.42, 'rgba(255,255,255,0.32)'); sh.addColorStop(0.5, 'rgba(255,255,255,0)');
-  c.fillStyle = sh; c.fillRect(0, 0, W, H);
-  // ロゴ
-  c.textAlign = 'center'; c.textBaseline = 'middle';
-  c.font = `400 ${46 * u}px ${DISP}`; strokeText(c, 'ANIMON', W / 2, 58 * u, '#ffd84a', darken(col, 0.55), 9 * u);
-  c.font = `900 ${14 * u}px ${BODY}`; strokeText(c, 'TRADING CARD GAME', W / 2, 88 * u, '#ffffff', darken(col, 0.55), 4 * u);
-  rr(c, W / 2 - 50 * u, 102 * u, 100 * u, 22 * u, 11 * u); c.fillStyle = 'rgba(255,255,255,0.92)'; c.fill();
-  c.fillStyle = darken(col, 0.3); c.font = `900 ${13 * u}px ${BODY}`; c.fillText('拡張パック', W / 2, 113.5 * u);
-  // 弾名
-  const ny = H * 0.82;
-  rr(c, 10 * u, ny - 34 * u, W - 20 * u, 72 * u, 14 * u); c.fillStyle = rgba(darken(col, 0.6), 0.55); c.fill();
-  fitFont(c, se.name, W - 40 * u, 34 * u, 400, DISP);
-  strokeText(c, se.name, W / 2, ny - 6 * u, '#ffffff', darken(col, 0.6), 7 * u);
-  c.font = `900 ${13 * u}px ${BODY}`; strokeText(c, se.en, W / 2, ny + 22 * u, col2, darken(col, 0.6), 4 * u);
-  // 5枚入り・弾コード
-  c.save(); c.fillStyle = '#e8322b'; c.beginPath(); c.arc(W - 36 * u, 150 * u, 24 * u, 0, Math.PI * 2); c.fill(); c.lineWidth = 3 * u; c.strokeStyle = '#fff'; c.stroke();
-  c.fillStyle = '#fff'; c.font = `900 ${12 * u}px ${BODY}`; c.fillText('5枚', W - 36 * u, 145 * u); c.font = `900 ${10 * u}px ${BODY}`; c.fillText('入り', W - 36 * u, 159 * u); c.restore();
-  c.font = `900 ${12 * u}px ${BODY}`; c.textAlign = 'left'; strokeText(c, se.code, 14 * u, H - cz - 12 * u, '#ffffff', 'rgba(0,0,0,0.5)', 3 * u);
+  // 虹色のホロ（うっすら）
+  c.save(); c.globalCompositeOperation = 'overlay'; c.globalAlpha = 0.35;
+  c.fillStyle = rainbowGrad(c, 0, H * 0.15, W, H * 0.85); c.fillRect(0, 0, W, H); c.restore();
+  hexes(c, 0, 0, W, H, 18 * u, lighten(col2, 0.6), 0.16);
+  rays(c, W / 2, H * 0.47, 34, 8 * u, H, lighten(col2, 0.35), 0.24, sid * 99);
+  bokeh(c, 0, 0, W, H, 16, col2, sid * 7, 46 * u);
+  glitter(c, 0, 0, W, H, 320, ['#ffffff', lighten(col2, 0.55)], sid * 13, 1.6 * u);
+  // ---- キャラの窓（キャラは窓から飛び出す） ----
+  const wx = 26 * u, wy = H * 0.26, ww = W - 52 * u, wh = H * 0.42;
+  c.save();
+  rr(c, wx, wy, ww, wh, 18 * u); c.clip();
+  const wg = c.createRadialGradient(W / 2, wy + wh * 0.55, 10 * u, W / 2, wy + wh * 0.55, ww * 0.8);
+  wg.addColorStop(0, lighten(col2, 0.65)); wg.addColorStop(0.55, lighten(col, 0.2)); wg.addColorStop(1, darken(col, 0.25));
+  c.fillStyle = wg; c.fillRect(wx, wy, ww, wh);
+  rays(c, W / 2, wy + wh * 0.6, 24, 4 * u, ww, '#ffffff', 0.28, sid * 41);
+  starfield(c, wx, wy, ww, wh, u, sid * 5, '#ffffff', 0.6);
+  if (img2) { c.save(); c.globalAlpha = 0.6; drawChar(c, img2, W * 0.76, wy + wh * 0.98, ww * 0.55, wh * 0.72, u); c.restore(); }
   c.restore();
-  // ギザギザ（上下）
+  // 窓のふち（銀の箔）
+  rr(c, wx, wy, ww, wh, 18 * u); c.lineWidth = 6 * u; c.strokeStyle = silverGrad(c, wx, wy, wx + ww, wy + wh); c.stroke();
+  rr(c, wx + 5 * u, wy + 5 * u, ww - 10 * u, wh - 10 * u, 14 * u); c.lineWidth = 1.5 * u; c.strokeStyle = 'rgba(255,255,255,0.6)'; c.stroke();
+  // メインのキャラ：窓の上にはみ出して大きく
+  drawChar(c, img, W * 0.48, wy + wh + 4 * u, W * 0.86, H * 0.46, u, { glow: rgba(lighten(col2, 0.6), 0.95), glowR: 18 * u });
+  // ---- 光沢（斜めの帯としわ） ----
+  const sh = c.createLinearGradient(0, 0, W, H * 0.7); sh.addColorStop(0.28, 'rgba(255,255,255,0)'); sh.addColorStop(0.4, 'rgba(255,255,255,0.34)'); sh.addColorStop(0.47, 'rgba(255,255,255,0)'); sh.addColorStop(0.62, 'rgba(255,255,255,0.12)'); sh.addColorStop(0.7, 'rgba(255,255,255,0)');
+  c.fillStyle = sh; c.fillRect(0, 0, W, H);
+  c.save(); c.globalAlpha = 0.1; c.strokeStyle = '#ffffff'; c.lineWidth = 2 * u;
+  const R = rng(sid * 77);
+  for (let i = 0; i < 7; i++) { const x0 = R() * W, y0 = cz + R() * (H - cz * 2); c.beginPath(); c.moveTo(x0, y0); c.quadraticCurveTo(x0 + (R() - 0.5) * 60 * u, y0 + 40 * u, x0 + (R() - 0.5) * 30 * u, y0 + (60 + R() * 60) * u); c.stroke(); }
+  c.restore();
+  // ---- ロゴ ----
+  c.textAlign = 'center'; c.textBaseline = 'middle';
+  const ly = 60 * u;
+  c.font = `400 ${50 * u}px ${DISP}`;
+  for (let k = 5; k >= 1; k--) strokeText(c, 'ANIMON', W / 2 + k * 0.6 * u, ly + k * 1.1 * u, darken(col, 0.7), null, 0); // 立体の影
+  c.save(); c.lineWidth = 11 * u; c.strokeStyle = ink; c.lineJoin = 'round'; c.strokeText('ANIMON', W / 2, ly);
+  c.fillStyle = goldGrad(c, 0, ly - 24 * u, 0, ly + 24 * u); c.fillText('ANIMON', W / 2, ly);
+  c.lineWidth = 1.5 * u; c.strokeStyle = 'rgba(255,255,255,0.8)'; c.strokeText('ANIMON', W / 2, ly - 1 * u); c.restore();
+  // リボン
+  const ry = 92 * u;
+  c.save(); c.fillStyle = darken(col, 0.55);
+  c.beginPath(); c.moveTo(W / 2 - 96 * u, ry - 11 * u); c.lineTo(W / 2 + 96 * u, ry - 11 * u); c.lineTo(W / 2 + 86 * u, ry); c.lineTo(W / 2 + 96 * u, ry + 11 * u); c.lineTo(W / 2 - 96 * u, ry + 11 * u); c.lineTo(W / 2 - 86 * u, ry); c.closePath(); c.fill();
+  c.fillStyle = '#ffffff'; c.font = `900 ${12.5 * u}px ${BODY}`; c.fillText('TRADING CARD GAME', W / 2, ry + 0.5 * u); c.restore();
+  rr(c, W / 2 - 46 * u, 110 * u, 92 * u, 20 * u, 10 * u); c.fillStyle = 'rgba(255,255,255,0.95)'; c.fill();
+  c.fillStyle = darken(col, 0.35); c.font = `900 ${12 * u}px ${BODY}`; c.fillText('拡張パック', W / 2, 120.5 * u);
+  // 「5枚入り」のギザギザバッジ
+  c.save(); const bx = W - 40 * u, by = 162 * u;
+  burst(c, bx, by, 24 * u, 31 * u, 14, 0.2); c.fillStyle = '#ffd23f'; c.fill(); c.lineWidth = 2.5 * u; c.strokeStyle = '#b23a00'; c.stroke();
+  c.beginPath(); c.arc(bx, by, 21 * u, 0, Math.PI * 2); c.fillStyle = '#e8322b'; c.fill();
+  c.fillStyle = '#fff'; c.font = `900 ${16 * u}px ${DISP}`; c.fillText('5枚', bx, by - 5 * u); c.font = `900 ${9 * u}px ${BODY}`; c.fillText('入り', bx, by + 10 * u); c.restore();
+  // 弾コードの盾
+  c.save(); const sx = 40 * u, sy = 164 * u;
+  c.beginPath(); c.moveTo(sx - 20 * u, sy - 20 * u); c.lineTo(sx + 20 * u, sy - 20 * u); c.lineTo(sx + 20 * u, sy + 6 * u); c.quadraticCurveTo(sx, sy + 26 * u, sx - 20 * u, sy + 6 * u); c.closePath();
+  c.fillStyle = silverGrad(c, sx - 20 * u, 0, sx + 20 * u, 0); c.fill(); c.lineWidth = 2 * u; c.strokeStyle = ink; c.stroke();
+  c.fillStyle = ink; c.font = `900 ${10 * u}px ${BODY}`; c.fillText('第' + se.id + '弾', sx, sy - 9 * u); c.font = `900 ${12 * u}px ${DISP}`; c.fillText(se.code, sx, sy + 5 * u); c.restore();
+  // ---- 弾名の帯（メタリック） ----
+  const ny = H * 0.8;
+  c.save();
+  rr(c, 12 * u, ny - 38 * u, W - 24 * u, 80 * u, 16 * u);
+  const bg = c.createLinearGradient(0, ny - 38 * u, 0, ny + 42 * u); bg.addColorStop(0, rgba(darken(col, 0.45), 0.92)); bg.addColorStop(1, rgba(darken(col, 0.75), 0.95));
+  c.fillStyle = bg; c.fill(); c.lineWidth = 3 * u; c.strokeStyle = goldGrad(c, 12 * u, 0, W - 12 * u, 0); c.stroke();
+  c.restore();
+  fitFont(c, se.name, W - 44 * u, 36 * u, 400, DISP);
+  strokeText(c, se.name, W / 2, ny - 8 * u, '#ffffff', ink, 7 * u);
+  c.font = `900 ${12 * u}px ${BODY}`; strokeText(c, se.en, W / 2, ny + 19 * u, lighten(col2, 0.3), ink, 3 * u);
+  // レア度の並び
+  const rl = ['N', 'R', 'SR', 'SSR', 'HR', 'UR'], rc = { N: '#9aa3ad', R: '#3a86ff', SR: '#c0c6d0', SSR: '#7fd1ff', HR: '#ff8fd8', UR: '#ffd23f' };
+  c.font = `900 ${8 * u}px ${BODY}`;
+  rl.forEach((r, i) => { const x = W / 2 + (i - 2.5) * 30 * u, y = ny + 33 * u; rr(c, x - 13 * u, y - 6 * u, 26 * u, 12 * u, 6 * u); c.fillStyle = rc[r]; c.fill(); c.fillStyle = r === 'N' || r === 'SR' ? '#1d2230' : '#ffffff'; c.fillText(r, x, y + 0.5 * u); });
+  // ---- 左右の貼り合わせ（シール）と、開け口 ----
+  for (const x0 of [0, W - 7 * u]) { const sg = c.createLinearGradient(x0, 0, x0 + 7 * u, 0); sg.addColorStop(0, 'rgba(0,0,0,0.25)'); sg.addColorStop(1, 'rgba(255,255,255,0.12)'); c.fillStyle = sg; c.fillRect(x0, 0, 7 * u, H); }
+  c.fillStyle = 'rgba(255,255,255,0.85)'; c.font = `800 ${8 * u}px ${BODY}`; c.textAlign = 'left'; c.fillText('▼ ここから開けてください', 12 * u, cz + 8 * u);
+  c.textAlign = 'right'; c.fillText('全年齢対象', W - 12 * u, H - cz - 8 * u);
+  c.restore();
+  // ---- ギザギザ（上下・銀の箔） ----
   c.fillStyle = silverGrad(c, 0, 0, W, 0);
   crimp(c, 0, 0, W, cz, -1); c.fill();
   crimp(c, 0, H - cz, W, cz, 1); c.fill();
-  c.fillStyle = 'rgba(0,0,0,0.12)'; for (let x0 = 0; x0 < W; x0 += 3 * u) { c.fillRect(x0, 2 * u, 1 * u, cz - 4 * u); c.fillRect(x0, H - cz + 2 * u, 1 * u, cz - 4 * u); }
+  c.fillStyle = 'rgba(0,0,0,0.13)'; for (let x0 = 0; x0 < W; x0 += 3 * u) { c.fillRect(x0, 2 * u, 1 * u, cz - 4 * u); c.fillRect(x0, H - cz + 2 * u, 1 * u, cz - 4 * u); }
+  c.fillStyle = 'rgba(255,255,255,0.5)'; c.fillRect(0, cz * 0.62, W, 1.5 * u); c.fillRect(0, H - cz * 0.62, W, 1.5 * u);
+  // 開け口の切れ込み
+  c.fillStyle = 'rgba(0,0,0,0.35)'; c.beginPath(); c.moveTo(0, cz * 0.85); c.lineTo(6 * u, cz * 1.0); c.lineTo(0, cz * 1.15); c.fill();
   c.restore();
 }
 // BOX の面：front（正面・横長）/ top（ふた）/ side（側面）
@@ -627,11 +697,11 @@ export function drawBox(c, sid, face, W, H, img, img2) {
     c.font = `900 ${14 * u}px ${BODY}`; strokeText(c, se.en, W * 0.25, 182 * u, col2, darken(col, 0.6), 4 * u);
     rr(c, W * 0.25 - 92 * u, 206 * u, 184 * u, 40 * u, 12 * u); c.fillStyle = '#e8322b'; c.fill(); c.lineWidth = 3 * u; c.strokeStyle = '#fff'; c.stroke();
     c.fillStyle = '#fff'; c.font = `900 ${19 * u}px ${BODY}`; c.fillText('BOOSTER BOX', W * 0.25, 220 * u);
-    c.font = `800 ${11 * u}px ${BODY}`; c.fillText('拡張パック 30パック入り', W * 0.25, 237 * u);
+    c.font = `800 ${11 * u}px ${BODY}`; c.fillText(`拡張パック ${BOX_PACKS}パック入り`, W * 0.25, 237 * u);
   } else {
     c.font = `400 ${Math.min(W * 0.18, 34 * u)}px ${DISP}`; strokeText(c, 'ANIMON', W / 2, H * 0.3, '#ffd84a', darken(col, 0.55), 6 * u);
     fitFont(c, se.name, W * 0.9, 22 * u, 400, DISP); strokeText(c, se.name, W / 2, H * 0.6, '#ffffff', darken(col, 0.6), 5 * u);
-    c.font = `900 ${12 * u}px ${BODY}`; strokeText(c, se.code + ' 30PACKS', W / 2, H * 0.82, col2, darken(col, 0.6), 3 * u);
+    c.font = `900 ${12 * u}px ${BODY}`; strokeText(c, se.code + ` ${BOX_PACKS}PACKS`, W / 2, H * 0.82, col2, darken(col, 0.6), 3 * u);
   }
   // ふちの金色ライン
   c.lineWidth = 6 * u; c.strokeStyle = goldGrad(c, 0, 0, W, H); c.strokeRect(3 * u, 3 * u, W - 6 * u, H - 6 * u);

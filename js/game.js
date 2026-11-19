@@ -1,8 +1,8 @@
 // ===== ゲームセッション（操作・同期・描画の橋渡し） =====
 import * as THREE from 'three';
-import { Sim, normalizeStore, getPrice, priceLimit, fitPlacement } from './sim.js';
+import { Sim, normalizeStore, getPrice, priceLimit, fitPlacement, handPid, HAND_MAX } from './sim.js';
 import { FIXTURES, PRODUCTS, boxProd, PLAYER_BOUNDS, PLAYER_SPAWN, BUILDING, MANAGER, STAFF_ROLES, TRASH_TYPES, DELIVERY_AREA, marketPrice, getWalls, fixtureFootprint, snapFixture, worldToLocal, pickSlot, pickBoxSlot,
-  checkoutSpot, localToWorld, slotCapacity, pickTag, tagLocal, isPack, isBoosterBox, pickCardSlot } from './data.js';
+  checkoutSpot, localToWorld, slotCapacity, pickTag, tagLocal, isPack, isBoosterBox, isSpray, pickCardSlot, canPlace } from './data.js';
 import { CARDS, RARITY, cardValue, cardPrice, cardLimit, rarityOrder, seriesOfProduct, isHit } from './cards.js';
 import { clamp, yen, dist, angleLerp, lerp } from './util.js';
 import { toast, h, modal, confirmBox } from './ui.js';
@@ -44,7 +44,7 @@ export class Game {
     if (room) this.ui.setRoom([h('b', {}, '👥 ルーム ' + roomId), h('span', { class: 'plist2' })]);
     if (!this.app.profile.tutorialDone && mode !== 'client') setTimeout(() => { if (this.app.game === this) this.help(true); }, 600);
     // 何もない状態から：まずは発注
-    setTimeout(() => { const st = this.store; if (st && st.day === 1 && st.phase === 'prep' && !st.boxes.length && !st.fixtures.some((f) => f.s && f.s.some((x) => x[1] > 0))) toast('📋 まずは入口の右のパソコン室（倉庫から入る）のボードでカードパックを発注しよう！', 'ok', 5000); }, 2500);
+    setTimeout(() => { const st = this.store; if (st && st.day === 1 && st.phase === 'prep' && !st.boxes.length && !st.fixtures.some((f) => f.s && f.s.some((x) => x[1] > 0))) toast('💻 まずは入口の右のパソコン室（倉庫から入る）のパソコンでカードパックを仕入れよう！', 'ok', 5000); }, 2500);
   }
   _bindRoom() {
     const R = this.room;
@@ -115,6 +115,13 @@ export class Game {
         if (e.to === me) { this.ui.showPackOpening(e); break; }
         const c = CARDS[e.best];
         if (c && rarityOrder(c.r) >= 3 || c?.flash && rarityOrder(c.r) >= 2) toast(`🎴 ${e.who || '仲間'}さんが開封！ ${c.flash ? '✨フラッシュの' : ''}${c.r}「${c.name}」が出た！`, 'ok', 3000);
+        break;
+      }
+      case 'boxopened': if (e.to === me) this.ui.showBoxOpened(e); break;
+      case 'spray': {
+        this.R.sprayFx?.(e.x, e.y || 1.2, e.z, e.tx, e.tz);
+        const v = clamp(1.1 - dist(e.x, e.z, this.pc.x, this.pc.z) / 18, 0.1, 1);
+        this.app.sfx.play('spray', v);
         break;
       }
       case 'summary': this.ui.closeAll(); this.ui.showSummary(e.data, this.mode !== 'client'); this.leaveRegister(true); if (this.sim) this.app.saveGame(true); break;
@@ -265,7 +272,7 @@ export class Game {
     const hit = this.R.pick(RAY, { boxes: true, fixtures: true, skip });
     RAY.near = 0;
     const front = hit ? (hit.point.x - p.x) * Math.sin(p.yaw) + (hit.point.z - p.z) * Math.cos(p.yaw) : 0;
-    if (hit && front > -0.15 && dist(hit.point.x, hit.point.z, p.x, p.z) <= REACH + (hit.type === 'fixture' && ['checkout', 'mboard', 'fboard', 'xboard', 'recycle', 'opensign', 'dumpster', 'trash', 'playtable', 'tourtable', 'disptable', 'cardtable', 'vintage'].includes(this.fx(hit.fid)?.t) ? 0.7 : 0)) {
+    if (hit && front > -0.15 && dist(hit.point.x, hit.point.z, p.x, p.z) <= REACH + (hit.type === 'fixture' && ['checkout', 'pc', 'fboard', 'xboard', 'recycle', 'opensign', 'dumpster', 'trash', 'playtable', 'tourtable', 'disptable', 'cardtable', 'vintage', 'smalldisp', 'cardshelf', 'cardtower'].includes(this.fx(hit.fid)?.t) ? 0.7 : 0)) {
       if (hit.type === 'fixture') {
         const f = this.fx(hit.fid); if (!f) return null;
         const [lx, lz] = worldToLocal(f, hit.point.x, hit.point.z);
@@ -299,6 +306,81 @@ export class Game {
   }
   fx(id) { return this.store.fixtures.find((f) => f.id === id); }
   held() { return this.store.boxes.find((b) => b.loc.t === 'h' && b.loc.who === this.me); }
+  hand() { return this.store?.hand?.[this.me] || null; }
+  // 消臭スプレー：向いている方向の少し先にシュッ
+  _spray() {
+    const p = this.pc, a = p.yaw;
+    this.act({ t: 'spray', x: p.x + Math.sin(a) * 1.1, z: p.z + Math.cos(a) * 1.1 });
+    this.pc.ry = a; this.reachT = 0.3;
+  }
+  // 手に持っている物（パック・BOX・消臭スプレー）のときの行動
+  _handActions(t, hd) {
+    const st = this.store, A = { act: null, alt: null, box: null, hint: '', info: '', slot: null };
+    const pid = handPid(hd), p = PRODUCTS[pid];
+    let take = null, put = null;
+    const extra = [];
+    if (hd.t === 'packs') {
+      const cnt = {}; for (const x of hd.a) cnt[x] = (cnt[x] || 0) + 1;
+      A.info = `🖐 手にパック <b>${hd.a.length}</b>個（${Object.entries(cnt).map(([k, n]) => `${PRODUCTS[k].short}×${n}`).join('・')}）`;
+      extra.push({ label: '🎴 パックを開封', icon: '🎴', fn: () => { if (!this.ui.packOpen) this.act({ t: 'handOpen' }); } });
+      if (hd.a.length > 1) extra.push({ label: `まとめて開封（${hd.a.length}）`, icon: '🎴', fn: () => { if (!this.ui.packOpen) this.act({ t: 'handOpen', all: true }); } });
+      A.hint = `その場で開封できます。棚を狙うと並べられます（パックは${HAND_MAX}個まで持てる）`;
+    } else if (hd.t === 'box') {
+      A.info = `🖐 手に <b>${p.name}</b>（1BOX＝10パック）`;
+      extra.push({ label: '🎁 BOXを開封', icon: '🎁', fn: () => { if (!this.ui.packOpen) this.act({ t: 'handBoxOpen' }); } });
+      A.hint = '開けると10パックが出てきます。BOXのまま棚に並べて売ることもできます（BOXのほうが高く売れる）';
+    } else if (hd.t === 'spray') {
+      A.info = `🧴 <b>消臭スプレー</b> 残り ${Math.round(hd.u * 100)}%`;
+      extra.push({ label: '🧴 シュッ', icon: '🧴', repeat: true, fn: () => this._spray() });
+      A.hint = '臭いお客さん（緑のもやもや）に近づいてスプレー！2回で臭いが消えます';
+    }
+    if (t?.type === 'fixture') {
+      const f = t.f, def = FIXTURES[f.t];
+      if (def.scent && hd.t === 'spray') {
+        const n = f.sp?.length || 0;
+        A.info += `<br>${def.icon} ${def.name}：スプレー ${n}/${def.scent.cans}本`;
+        if (n < def.scent.cans) put = { label: 'スプレーをセット', fn: () => this.act({ t: 'scentLoad', fid: f.id }) };
+        else A.hint = 'もうスプレーがいっぱいです';
+      } else if (TRASH_TYPES.includes(f.t) && hd.t === 'spray') {
+        put = { label: 'スプレーを捨てる', fn: () => this.act({ t: 'handTrash' }) };
+      } else if (def.slots && t.si >= 0) {
+        const sl = def.slots[t.si], s = f.s[t.si];
+        A.slot = [f.id, sl];
+        if (hd.t === 'packs' && s[0] && isPack(s[0]) && s[1] > 0 && hd.a.length < HAND_MAX) take = { label: '手に持つ', repeat: true, fn: () => this.act({ t: 'handTake', fid: f.id, si: t.si }) };
+        const cap = slotCapacity(pid, sl);
+        if (hd.t === 'spray' && hd.u < 0.999) { if (!take) A.hint = '使いかけのスプレーは棚に戻せません'; }
+        else if (!canPlace(pid, sl)) A.hint = `⚠ ${p.name}はこの棚に置けません`;
+        else if (s[0] && s[0] !== pid && s[1] > 0) { if (!take) A.hint = `⚠ ${PRODUCTS[s[0]].name}が並んでいます`; }
+        else if (s[0] === pid && s[1] >= cap) A.hint = '棚がいっぱいです';
+        else put = { label: '棚に置く', repeat: true, fn: () => this.act({ t: 'handPut', fid: f.id, si: t.si }) };
+        A.info += s[0] ? `<br>棚：${PRODUCTS[s[0]].icon} ${PRODUCTS[s[0]].name} ${s[1]}/${slotCapacity(s[0], sl)}` : '<br>棚：空き（置くとその商品の値札がつきます）';
+      }
+    } else if (t?.type === 'box') {
+      const b = st.boxes.find((o) => o.id === t.bid);
+      if (b) {
+        A.info += `<br>📦 段ボール：${b.n > 0 ? `${boxProd(b.p).icon} ${boxProd(b.p).name} ×${b.n}` : '空'}${b.o ? '（開いている）' : '（閉じている）'}`;
+        if (hd.t === 'packs' && b.o && b.n > 0 && isPack(b.p) && hd.a.length < HAND_MAX) take = { label: '手に持つ', repeat: true, fn: () => this.act({ t: 'handTake', bid: b.id }) };
+        if (b.o && (b.n <= 0 || b.p === pid) && b.n < p.qty && !(hd.t === 'spray' && hd.u < 0.999)) put = { label: '段ボールに戻す', repeat: true, fn: () => this.act({ t: 'handBox', bid: b.id }) };
+        else if (!b.o && b.loc.t === 'f') A.hint = '段ボールを開けると戻せます';
+      }
+    }
+    // レジ・パソコン・カードの棚など（手に持った物と関係ない設備）は、ふだんの行動を優先して、空いたボタンに開封などを入れる
+    if (t?.type === 'fixture' && !take && !put && !(FIXTURES[t.f.t].slots && t.si >= 0) && !FIXTURES[t.f.t].scent) {
+      this._noHand = true; let A0;
+      try { A0 = this._actions(t); } finally { this._noHand = false; }
+      const hx = extra.slice();
+      const out = { ...A0, info: (A0.info ? A0.info + '<br>' : '') + A.info, hint: A0.hint || A.hint };
+      if (!out.act) out.act = hx.shift() || null;
+      if (!out.alt) out.alt = hx.shift() || null;
+      if (!out.box) out.box = hx.shift() || null;
+      if (out.box) out.box.icon ||= '🎴';
+      return out;
+    }
+    const acts = [take, put, ...extra].filter(Boolean);
+    [A.act, A.alt, A.box] = [acts[0] || null, acts[1] || null, acts[2] || null];
+    if (A.box) A.box.icon ||= '🎴';
+    return A;
+  }
   dropPoint() { const p = this.pc; return { x: p.x + Math.sin(p.ry) * 0.75, z: p.z + Math.cos(p.ry) * 0.75, ry: p.ry }; }
   heldCrate() { return (this.store?.crates || []).find((c) => c.loc.t === 'h' && c.loc.who === this.me); }
   // 置く場所：画面のまん中で狙った床（自分と重ならないように少し押し出す）
@@ -346,6 +428,8 @@ export class Game {
         return A;
       }
     }
+    const hd = this.hand();
+    if (hd && !held && !this._noHand) return this._handActions(t, hd);
     const drop = { label: '床に置く', fn: () => this.act({ t: 'drop', ...this.dropPoint() }) };
     if (held) {
       const p = boxProd(held.p), empty = held.n <= 0;
@@ -354,7 +438,7 @@ export class Game {
       A.box = { label: held.o ? '閉じる' : '開ける', fn: () => this.act({ t: 'boxOpen', open: !held.o }) };
       // カードパック・BOX の箱なら、自分で開封できる（コレクションに入る）
       const sid = held.n > 0 ? seriesOfProduct(held.p) : 0;
-      const opener = sid ? { label: isPack(held.p) ? '🎴 パックを開封' : '🎁 BOXを開封', fn: () => { if (this.ui.packOpen) return; if (!held.o) this.act({ t: 'boxOpen', open: true }); this.act({ t: 'openPack' }); } } : null;
+      const opener = sid ? { label: isPack(held.p) ? '🎴 パックを開封' : '🎁 BOXを開封', fn: () => { if (this.ui.packOpen) return; if (!held.o) this.act({ t: 'boxOpen', open: true }); this.act({ t: 'openPack', ...this.dropPoint() }); } } : null;
       if (t?.type === 'fixture' && t.si != null && t.si >= 0 && empty) {
         // 空の段ボール：どの商品でも詰められる（詰めるとその商品の箱になる）
         const f = t.f, sl = FIXTURES[f.t].slots[t.si], s = f.s[t.si];
@@ -390,6 +474,12 @@ export class Game {
         else if (!lb && held.n > 0) A.hint = `置くとこの段に「${p.name}」のラベルが貼られます`;
         A.info += `<br>🏷 ラベル：${lb ? PRODUCTS[lb]?.icon + ' ' + PRODUCTS[lb]?.name : 'なし'}`;
         A.alt = drop;
+      } else if (t?.type === 'fixture' && FIXTURES[t.f.t].scent) {
+        const f = t.f, def = FIXTURES[f.t], n = f.sp?.length || 0;
+        A.info += `<br>${def.icon} ${def.name}：スプレー ${n}/${def.scent.cans}本`;
+        if (isSpray(held.p) && held.n > 0 && n < def.scent.cans) A.act = { label: 'スプレーをセット', repeat: true, fn: () => { if (!held.o) this.act({ t: 'boxOpen', open: true }); this.act({ t: 'scentLoad', fid: f.id }); } };
+        else A.hint = isSpray(held.p) ? (n >= def.scent.cans ? 'もうスプレーがいっぱいです' : '') : '消臭スプレーの段ボールを持ってくるとセットできます';
+        A.alt = drop;
       } else if (t?.type === 'fixture' && t.f.t === 'recycle') {
         A.act = held.n === 0 ? { label: 'リサイクル', fn: () => this.act({ t: 'recycle' }) } : null; A.hint = held.n ? '空の箱だけリサイクルできます' : ''; A.alt = drop;
       } else if (t?.type === 'fixture' && t.f.t === 'opensign') {
@@ -399,7 +489,7 @@ export class Game {
         A.act = held.n === 0 ? { label: 'ゴミ箱に捨てる', fn: () => this.act({ t: 'discard', fid }) } : null; A.hint = held.n ? '空の段ボールだけ捨てられます' : ''; A.alt = drop;
       } else {
         A.act = drop;
-        if (opener) { A.alt = opener; A.hint = `${isPack(held.p) ? 'パック' : 'BOX'}を開けるとカードがコレクション（📒バインダー）に入ります。シングルはカードテーブルで売れます`; }
+        if (opener) { A.alt = opener; A.hint = isPack(held.p) ? 'パックを開けるとカードがコレクションファイル（📒）に入ります。シングルはカードの棚で売れます' : 'BOXを開けると段ボールは足元に置いて、10パックが手に出てきます'; }
         if (held.n === 0) A.hint = '空の段ボール：棚の商品を詰めて運べます（いらなければゴミ箱🗑️・リサイクル♻️へ）';
       }
       return A;
@@ -410,7 +500,12 @@ export class Game {
       const p = boxProd(b.p);
       A.info = b.n > 0 ? `📦 <b>${p.icon} ${p.name}</b> ×${b.n}${b.o ? '（開いている）' : ''}` : `📦 <b>空の段ボール</b>${b.o ? '（開いている）' : ''}<br>どの商品でも1種類だけ詰められます`;
       A.act = { label: '拾う', fn: () => this.act({ t: 'pick', bid: b.id }) };
-      if (b.loc.t === 'f' && b.loc.y < 0.05) A.alt = { label: b.o ? '閉じる' : '開ける', fn: () => this.act({ t: 'boxOpen', bid: b.id, open: !b.o }) };
+      const holdable = b.n > 0 && (isPack(b.p) || isBoosterBox(b.p) || isSpray(b.p));
+      const toggle = { label: b.o ? '閉じる' : '開ける', icon: '📦', fn: () => this.act({ t: 'boxOpen', bid: b.id, open: !b.o }) };
+      if (b.loc.t === 'f' && b.loc.y < 0.05) {
+        if (holdable && b.o) { A.alt = { label: isPack(b.p) ? 'パックを手に持つ' : '手に持つ', repeat: isPack(b.p), fn: () => this.act({ t: 'handTake', bid: b.id }) }; A.box = toggle; A.hint = isPack(b.p) ? `パックは${HAND_MAX}個まで手に持てます（持ったまま開封もできる）` : ''; }
+        else { A.alt = toggle; if (holdable) A.hint = '開けると中身を手に持てます'; }
+      }
       if (b.loc.t === 'r') {
         const f = this.fx(b.loc.fid), lb = f?.lb?.[b.loc.si];
         A.info += `<br>🏷 ラベル：${lb ? PRODUCTS[lb]?.icon + ' ' + PRODUCTS[lb]?.name : 'なし'}`;
@@ -433,15 +528,15 @@ export class Game {
         A.info = `🃏 <b>${c.name}</b> <span class="rar r-${c.r}">${c.r}</span>${c.flash ? ' <span class="rar flash">✨フラッシュ</span>' : ''}<br>売値 <b>${yen(pr)}</b>（相場 ${yen(cardValue(st, cid))}・${yen(lim)}まで売れる）${pr > lim ? '<br><b style="color:#ff6b81">🚫 高すぎて売れません</b>' : ''}`;
         A.act = { label: '値段を変える', icon: '🏷', fn: () => this.ui.openCardPrice(cid) };
         A.alt = { label: '回収', fn: () => this.act({ t: 'cardTake', fid: f.id, ci }) };
-        A.hint = 'カードをタップしてもくわしく見られます（📒バインダー）';
+        A.hint = 'カードをタップしてもくわしく見られます（📒コレクションファイル）';
       } else {
         A.act = { label: 'カードを置く', icon: '🃏', fn: () => this.ui.openCardPicker(f.id, ci) };
-        A.hint = 'バインダーから選んで並べよう（おまかせ陳列で、ダブったカードをまとめて並べられます）';
+        A.hint = 'コレクションファイルから選んで並べよう（おまかせ陳列で、ダブったカードをまとめて並べられます）';
       }
       return A;
     }
     if (def.seats) {
-      A.info = `${def.icon} ${def.name}（${def.seats.length}人用）<br>プレイ料金 <b>${yen(st.playFee ?? 0)}</b>（パソコン室のボードで変更）`;
+      A.info = `${def.icon} ${def.name}（${def.seats.length}人用）<br>プレイ料金 <b>${yen(st.playFee ?? 0)}</b>（パソコンの「お店」で変更）`;
       A.hint = 'お客さんがここで対戦して、レジでプレイ料金を払います';
       return A;
     }
@@ -462,12 +557,26 @@ export class Game {
         A.info = `<b>${p.icon} ${p.name}</b> ${s[1]}/${slotCapacity(s[0], sl)}<br>売値 ${yen(price)}（相場 ${yen(marketPrice(st, s[0]))}）${price > priceLimit(st, s[0]) ? '<br><b style="color:#ff6b81">🚫 高すぎて売れません</b>' : ''}`;
         A.hint = '🏷 棚のふちの値札を狙うと値段を変えられます';
         if (s[1] === 0) A.alt = { label: 'ラベル解除', fn: () => this.act({ t: 'clearSlot', fid: f.id, si: t.si }) };
+        else if (isPack(s[0])) {
+          A.act = { label: '手に持つ', repeat: true, fn: () => this.act({ t: 'handTake', fid: f.id, si: t.si }) };
+          A.alt = { label: `${HAND_MAX}パック持つ`, fn: () => this.act({ t: 'handTake', fid: f.id, si: t.si, all: true }) };
+          A.hint = `パックは${HAND_MAX}個まで手に持てて、その場で開封できます`;
+        } else if (isBoosterBox(s[0]) || isSpray(s[0])) {
+          A.act = { label: '手に持つ', fn: () => this.act({ t: 'handTake', fid: f.id, si: t.si }) };
+          A.hint = isSpray(s[0]) ? '消臭スプレーは売り物にも、臭いお客さん対策にも使えます' : 'BOXは1つ手に持って開けられます（10パック入り）';
+        }
       } else { A.info = `${def.name}：空き（箱を持って補充）`; A.hint = '商品の箱を持ってきて「補充」しよう'; }
       return A;
     }
     if (f.t === 'opensign') return Object.assign(A, this._signAction(st));
     if (f.t === 'checkout') { A.act = { label: 'レジに入る', fn: () => this.enterRegister(f.id) }; A.info = '🧾 レジカウンター'; return A; }
-    if (f.t === 'mboard') { A.act = { label: '発注・管理', fn: () => this.ui.openPC('order') }; A.info = '📋 マネージャーボード：発注・従業員・評判・お店'; return A; }
+    if (f.t === 'pc') { A.act = { label: 'パソコンを使う', icon: '💻', fn: () => this.ui.openPC('order') }; A.info = '💻 パソコン：仕入れ・ライセンス・従業員・評判・お店'; return A; }
+    if (def.scent) {
+      const n = f.sp?.length || 0, left = (f.sp || []).reduce((t, u) => t + u, 0);
+      A.info = `${def.icon} <b>${def.name}</b><br>スプレー ${n}/${def.scent.cans}本（残り ${Math.round(left * 100)}%）・間隔 ${def.scent.cd}秒・範囲 ${def.scent.range}m`;
+      A.hint = n ? '近くを通った臭いお客さんに自動でスプレーします' : '消臭スプレーを手に持つか、スプレーの段ボールを持ってきてセットしよう';
+      return A;
+    }
     if (f.t === 'fboard') { A.act = { label: 'カード相場', fn: () => this.ui.openBinder({ tab: 'market' }) }; A.info = '📈 カード相場ボード：シングルの相場・コレクション'; return A; }
     if (f.t === 'xboard') { A.act = { label: '店舗拡張', fn: () => this.ui.openExpand() }; A.info = '🗺️ 売り場・倉庫を買い足す'; return A; }
     if (f.t === 'recycle') { A.info = '♻️ 空き箱を入れるとお金になる'; A.hint = '空き箱を持ってくるとリサイクルできます'; return A; }
@@ -503,7 +612,7 @@ export class Game {
     this.input.setLabel('alt', A.alt?.label || '', !!A.alt);
     this.input.setLabel('box', A.box?.label || '', !!A.box, A.box?.icon || '📦'); this.input.setVisible('box', !!A.box);
     this.ui.setHint(A.hint, A.info);
-    const k = this.input.touchVisible ? '' : `${A.act ? 'E/左クリック：' + A.act.label + '　' : ''}${A.alt ? 'Q/右クリック：' + A.alt.label + '　' : ''}${A.box ? 'F：' + A.box.label + '　' : ''}B：建築　C：バインダー　V：視点　Tab：評判　Esc：メニュー${this.room ? '　Enter：チャット' : ''}`;
+    const k = this.input.touchVisible ? '' : `${A.act ? 'E/左クリック：' + A.act.label + '　' : ''}${A.alt ? 'Q/右クリック：' + A.alt.label + '　' : ''}${A.box ? 'F：' + A.box.label + '　' : ''}B：建築　C：コレクション　V：視点　Tab：評判　Esc：メニュー${this.room ? '　Enter：チャット' : ''}`;
     this.ui.setKeys(k);
     this.ui.showCross(true);
     this.timers.repeat -= dt;
@@ -676,15 +785,16 @@ export class Game {
     const heldBy = new Set(st.boxes.filter((b) => b.loc.t === 'h').map((b) => b.loc.who));
     const p = this.pc;
     const myAn = this.state === 'reg' ? 'scan' : this.reachT > 0 ? 'reach' : null;
-    list.push({ key: 'me', kind: 'player', av: this.app.profile.av, x: p.x, y: p.y, z: p.z, ry: p.ry, local: true, an: myAn, carry: heldBy.has(this.me),
+    const hands = st.hand || {};
+    list.push({ key: 'me', kind: 'player', av: this.app.profile.av, x: p.x, y: p.y, z: p.z, ry: p.ry, local: true, an: myAn, carry: heldBy.has(this.me), hand: hands[this.me] || null,
       name: s.names && this.room ? this.app.profile.name : null, nameColor: '#ffe14d', visible: s.cam !== 'first' || this.state === 'reg',
       bubble: this.chat[this.me] ? 'chat' : null, bubbleText: this.chat[this.me]?.text });
     for (const [uid, pl] of Object.entries(this.players)) {
       if (pl.x == null) continue;
-      list.push({ key: 'p:' + uid, kind: 'player', av: pl.av, x: pl.x, y: pl.y || 0, z: pl.z, ry: pl.ry || 0, an: pl.an === 'walk' ? null : pl.an, carry: heldBy.has(uid),
+      list.push({ key: 'p:' + uid, kind: 'player', av: pl.av, x: pl.x, y: pl.y || 0, z: pl.z, ry: pl.ry || 0, an: pl.an === 'walk' ? null : pl.an, carry: heldBy.has(uid), hand: hands[uid] || null,
         name: s.names ? pl.n : null, bubble: this.chat[uid] ? 'chat' : null, bubbleText: this.chat[uid]?.text });
     }
-    for (const c of d.c || []) list.push({ key: 'c:' + c[0], kind: 'cust', av: c[1], seedAv: true, x: c[2], z: c[3], ry: c[4], an: c[5] === 'walk' ? null : c[5], bubble: c[6] || null, basket: c[7], items: c[8] || '', hold: c[9] || '', small: true });
+    for (const c of d.c || []) list.push({ key: 'c:' + c[0], kind: 'cust', av: c[1], seedAv: true, x: c[2], z: c[3], ry: c[4], an: c[5] === 'walk' ? null : c[5], bubble: c[6] || null, basket: c[7], items: c[8] || '', hold: c[9] || '', smell: c[10] || 0, small: true });
     const staffById = Object.fromEntries(st.staff.map((x) => [x.id, x]));
     for (const e of d.s || []) {
       const sd = staffById[e[0]]; if (!sd) continue;
@@ -697,6 +807,7 @@ export class Game {
     const holders = (who) => R.getChar(who === this.me ? 'me' : who.startsWith('s:') ? [...R.chars.keys()].find((k) => k.startsWith(who + ':')) : 'p:' + who);
     const fpH = s.cam === 'first' && this.state !== 'reg' ? { who: this.me, av: this.app.profile.av, bob: this.fpBob || 0 } : null;
     R.syncBoxes(st, holders, fpH);
+    R.syncHands?.(list, fpH && !heldBy.has(this.me) ? { ...fpH, hand: hands[this.me] || null } : null);
     R.syncCrates(st, holders, fpH);
     R.syncRegs(st, d.r || {});
     R.syncPlayCards(st, d.pt || {});
@@ -707,22 +818,28 @@ export class Game {
   help(first) {
     const m = document.createElement('div');
     const steps = [
-      ['📋', '最初は棚も倉庫も空っぽ。入口の右のパソコン室（倉庫から入る）のマネージャーボードで、カードパック・BOX・サプライを発注しよう'],
-      ['🪂', '発注した段ボールは店の前の「荷物置き場」に空から降ってくる。倉庫の倉庫棚に運ぶか、そのまま棚に補充'],
+      ['💻', '最初は棚も倉庫も空っぽ。入口の右のパソコン室（倉庫から入る）のパソコンの「🛒仕入れ」で、カードパック・BOX・サプライを注文しよう'],
+      ['🔑', '商品は原作どおり「ライセンス」制。お店のレベルが上がると新しい商品のライセンスが買えるようになり、お金を払ってライセンスを買うと仕入れられる'],
+      ['🪂', '注文した段ボールは店の前の「荷物置き場」に空から降ってくる。倉庫の倉庫棚に運ぶか、そのまま棚に補充'],
       ['📦', '段ボールを持って「開ける」（F／📦ボタン）→ 棚を狙って「補充」（長押しで連続）。補充するとその商品の値札がつく'],
-      ['🎴', 'パック・BOXの段ボールを持っているとき「開封」でカードを開けられる！出たカードは📒バインダー（Cキー・画面上の📒）に入る'],
+      ['🖐', '棚や開けた段ボールのパックは「手に持つ」で最大5パックまで持てて、その場で開封できる。BOXは1つだけ持てる'],
+      ['🎁', 'BOXを開けると10パックが出てくる。そのまま開封しても、途中でやめても、手に持ったまま棚に並べてもOK。BOXのまま売ると10パックより高く売れる'],
       ['🌈', 'レア度は N → R → SR → SSR → HR（レインボー）→ UR（ゴールド）。封入率は1枚ごとの独立判定（UR 0.25%・HR 1%・SSR 4%・SR 7.6%・R 17.35%・N 69.8%）'],
       ['✨', 'どのレア度にも5%で「フラッシュ（箔付き）」が付く。カードが輝いて、相場は3倍。レアなカードほど高く売れる'],
-      ['🃏', 'カードテーブルやショーケースを狙って「カードを置く」でシングルカードを売れる。値段は相場の+20%までなら買ってもらえる'],
-      ['🎮', 'プレイテーブルを置くと、お客さんが対戦してレジでプレイ料金を払ってくれる（料金はボードの「お店」で変更）'],
-      ['🏷️', '倉庫棚の段には「ラベル」を貼れる。品出し係は、ラベルの貼ってある段にだけその商品を置く（ラベルがないと外の段ボールを片付けない）'],
-      ['🧑‍💼', '従業員は「とても遅い〜とても早い」の5段階。レジ係が得意な人と品出し係が得意な人がいる。お店 Lv.5 から雇えて、最大10人'],
+      ['📒', '出たカードは📒コレクションファイル（Cキー・画面上の📒）に入る。9ポケットのページをめくって見られる'],
+      ['🃏', 'シングルカード棚やカードテーブルを狙って「カードを置く」→ コレクションファイルから選んで並べると売れる。値段は相場の+20%まで'],
+      ['🤢', 'ときどき臭いお客さん（緑のもやもや）が来る。近くのお客さんがイヤがって帰ってしまうので、消臭スプレーを手に持って「シュッ」。2回で臭いが消える'],
+      ['🌬️', '消臭スプレーは仕入れて売ることも、自分で使うこともできる。Lv.5からオートセント（自動消臭機）が買えて、スプレーをセットすると自動で消臭（Lv.18・Lv.40でスプレーの間隔が短い機種が出る）'],
+      ['🎮', 'プレイテーブルを置くと、お客さんが対戦してレジでプレイ料金を払ってくれる（料金はパソコンの「お店」で変更）'],
+      ['🏷️', '倉庫棚の段には「ラベル」を貼れる。品出しは、ラベルの貼ってある段にだけその商品を置く（ラベルがないと外の段ボールを片付けない）'],
+      ['🧑‍💼', '従業員はだれでもレジと品出しの両方ができるが、人によって得意さ（とても遅い〜とても早い）がちがう。「🔄両方」にすると、レジに並んだらレジへ、空いたら品出し。Lv.5から、🔑雇用ライセンスを買って雇える（最大10人）'],
       ['🪧', '入口の看板を「OPEN」にすると営業スタート。レジに入って商品をタップ→スキャン、おつりを渡す'],
-      ['⭐', 'お店のレベルは最大50。レベルが上がると新しい弾・棚・従業員・レジの台数が増える（スキルボードはありません）'],
-      ['📈', '商品にもカードにも毎日変わる相場がある。カード相場ボード（パソコン室）や📒バインダーで確認しよう'],
+      ['⭐', 'お店のレベルは最大50。レベルが上がると新しいライセンス・棚・従業員・レジの台数が増える（スキルボードはありません）'],
+      ['📈', '商品にもカードにも毎日変わる相場がある。カード相場ボード（パソコン室）や📒コレクションファイルで確認しよう'],
       ['♻️', '空き箱はゴミ箱か、建物の右の外のリサイクルボックスへ'], ['🗺️', 'お金がたまったら区画を買い足して、売り場は左と奥へ、倉庫は奥へ広げよう'],
-      ['🔨', '建築ボタンで棚・カードテーブル・レジ・看板を設置。置いてある設備は狙って「🔧動かす」（F）で移動できる'], ['🎥', 'Vキー／設定で一人称と三人称を切り替え'],
+      ['🔨', '建築ボタンで棚・カードの棚・レジ・消臭機・看板を設置。置いてある設備は狙って「🔧動かす」（F）で移動できる'], ['🎥', 'Vキー／設定で一人称と三人称を切り替え'],
     ];
+
     m.append(...steps.map(([i, t]) => h('div', { class: 'help-row' }, h('span', { class: 'hi' }, i), h('span', {}, t))));
     const md = modal('❓ 遊び方', [m, h('button', { class: 'btn big', onclick: () => md.close() }, 'わかった！')], { onClose: () => { this.ui.closed(); if (first) { this.app.profile.tutorialDone = true; this.app.saveLocal(); } } });
     this.ui.opened(md);

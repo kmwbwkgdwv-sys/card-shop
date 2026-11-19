@@ -133,31 +133,67 @@ export function getWalls(store) {
   return w;
 }
 
-// ---------- 商品（カードパック・BOX・サプライ） ----------
-// place: 置ける棚の種類 / size: [幅,高さ,奥行] / stack: 積み段数 / bx: 段ボールの大きさ / qty: 段ボール1箱の入り数 / lv: 発注できるようになるお店のレベル
+// ---------- 商品（カードパック・BOX・サプライ・グッズ・その他） ----------
+// place: 置ける棚の種類 / size: [幅,高さ,奥行] / stack: 積み段数 / bx: 段ボールの大きさ / qty: 段ボール1箱の入り数 / lv: ライセンスが買えるようになるお店のレベル
+// lic: ライセンス料（原作どおり、レベルが届いたらお金を払ってライセンスを買うと仕入れられる）/ model: 3Dモデルの種類
 export const CATEGORIES = {
   pack: { name: 'パック', icon: '🎴' }, box: { name: 'BOX', icon: '🎁' }, supply: { name: 'サプライ', icon: '🧰' },
+  goods: { name: 'グッズ', icon: '🧸' }, other: { name: 'その他', icon: '🧴' },
 };
 const P = (o) => ({ place: ['gen'], stack: 1, bx: 'm', ...o, max: o.qty });
+const r500 = (v) => Math.round(v / 500) * 500;
 export const PACK_QTY = 30; // 段ボール1箱にパック30個
 export const BOXES_PER_CARTON = 8; // 段ボール1箱に BOX 8個
-export const PRODUCTS_LIST = [
-  // バラパック（1パック5枚入り）と BOX（30パック入り）
-  ...SERIES.map((s) => P({ id: 'pk' + s.id, name: `${s.name} パック`, short: s.name, cat: 'pack', series: s.id, cost: Math.round(s.price * 0.68), price: s.price, qty: PACK_QTY,
-    size: [0.074, 0.122, 0.012], icon: '🎴', color: s.color, lv: s.lv })),
-  ...SERIES.map((s) => P({ id: 'bx' + s.id, name: `${s.name} BOX`, short: s.name, cat: 'box', series: s.id, cost: Math.round(s.price * 30 * 0.7), price: s.price * 30, qty: BOXES_PER_CARTON,
-    size: [0.15, 0.09, 0.056], stack: 3, icon: '🎁', color: s.color, lv: s.boxLv, bx: 'l' })),
-  // サプライ
-  P({ id: 'sleeve', name: 'カードスリーブ', cat: 'supply', cost: 180, price: 300, qty: 24, size: [0.075, 0.105, 0.016], icon: '🃏', color: '#3a86ff', lv: 1 }),
-  P({ id: 'deckcase', name: 'デッキケース', cat: 'supply', cost: 360, price: 600, qty: 12, size: [0.078, 0.102, 0.078], stack: 2, icon: '🗃️', color: '#e63946', lv: 2 }),
-  P({ id: 'loader', name: 'カードローダー', cat: 'supply', cost: 120, price: 200, qty: 24, size: [0.08, 0.11, 0.02], icon: '🪟', color: '#90e0ef', lv: 4 }),
-  P({ id: 'playmat', name: 'プレイマット', cat: 'supply', cost: 1100, price: 1800, qty: 8, size: [0.075, 0.3, 0.075], icon: '🧻', color: '#7b2cbf', lv: 6, bx: 'l' }),
-  P({ id: 'binder', name: 'コレクションバインダー', cat: 'supply', cost: 900, price: 1500, qty: 6, size: [0.24, 0.3, 0.05], icon: '📒', color: '#2a9d8f', lv: 9, bx: 'l' }),
-  P({ id: 'storage', name: 'ストレージボックス', cat: 'supply', cost: 240, price: 400, qty: 8, size: [0.1, 0.08, 0.3], stack: 3, icon: '📦', color: '#f4a261', lv: 11 }),
-  P({ id: 'dice', name: 'ダイス＆コインセット', cat: 'supply', cost: 210, price: 350, qty: 24, size: [0.07, 0.07, 0.07], stack: 2, icon: '🎲', color: '#ef476f', lv: 14, bx: 's' }),
-  P({ id: 'figure', name: 'アニモンフィギュア', cat: 'supply', cost: 1500, price: 2500, qty: 6, size: [0.11, 0.17, 0.11], icon: '🧸', color: '#ffb703', lv: 20 }),
-  P({ id: 'psleeve', name: 'プレミアムスリーブ', cat: 'supply', cost: 540, price: 900, qty: 24, size: [0.075, 0.105, 0.016], icon: '✨', color: '#c9a227', lv: 28 }),
+export const BOX_PREMIUM = 1.2; // BOXの相場は「10パック分」の1.2倍（BOXのまま売るほうが高く売れる）
+// サプライ・グッズ（[id, 名前, カテゴリ, 仕入, 売値, 入り数, 大きさ, アイコン, 色, Lv, モデル, ブランド, 内容量, 追加]）
+const GOODS = [
+  ['sleeve', 'カードスリーブ（ベーシック）', 'supply', 180, 300, 24, [0.075, 0.105, 0.016], '🃏', '#3a86ff', 1, 'sleeve', 'CardGuard', '65枚入り'],
+  ['deckcase', 'デッキケース（レッド）', 'supply', 360, 600, 12, [0.078, 0.102, 0.078], '🗃️', '#e63946', 2, 'deckcase', 'DeckPro', '100枚収納', { stack: 2 }],
+  ['sleeveF', 'カードスリーブ（ほのお）', 'supply', 210, 350, 24, [0.075, 0.105, 0.016], '🔥', '#ff6b35', 4, 'sleeve', 'CardGuard', '65枚入り'],
+  ['loader', 'カードローダー', 'supply', 120, 200, 24, [0.08, 0.11, 0.02], '🪟', '#90e0ef', 4, 'loader', 'ClearShield', '25枚入り'],
+  ['deckcaseB', 'デッキケース（ブルー）', 'supply', 360, 600, 12, [0.078, 0.102, 0.078], '🗃️', '#2f6fdf', 6, 'deckcase', 'DeckPro', '100枚収納', { stack: 2 }],
+  ['playmat', 'プレイマット', 'supply', 1100, 1800, 8, [0.075, 0.3, 0.075], '🧻', '#7b2cbf', 6, 'playmat', 'BattleField', '60×35cm', { bx: 'l' }],
+  ['sleeveW', 'カードスリーブ（みず）', 'supply', 210, 350, 24, [0.075, 0.105, 0.016], '💧', '#1d8fe1', 7, 'sleeve', 'CardGuard', '65枚入り'],
+  ['binder', 'コレクションバインダー', 'supply', 900, 1500, 6, [0.24, 0.3, 0.05], '📒', '#2a9d8f', 9, 'binder', 'CollectBook', '9ポケット×20', { bx: 'l' }],
+  ['sleeveG', 'カードスリーブ（くさ）', 'supply', 210, 350, 24, [0.075, 0.105, 0.016], '🍃', '#2a9d48', 10, 'sleeve', 'CardGuard', '65枚入り'],
+  ['storage', 'ストレージボックス', 'supply', 240, 400, 8, [0.1, 0.08, 0.3], '📦', '#f4a261', 11, 'storage', 'StoreMax', '400枚収納', { stack: 3 }],
+  ['sleeveE', 'カードスリーブ（でんき）', 'supply', 210, 350, 24, [0.075, 0.105, 0.016], '⚡', '#f5b800', 13, 'sleeve', 'CardGuard', '65枚入り'],
+  ['dice', 'ダイス＆コインセット', 'supply', 210, 350, 24, [0.07, 0.07, 0.07], '🎲', '#ef476f', 14, 'dice', 'LuckyRoll', 'ダイス2＋コイン', { stack: 2, bx: 's' }],
+  ['deckcaseK', 'デッキケース（ブラック）', 'supply', 480, 800, 12, [0.078, 0.102, 0.078], '🗃️', '#2b2d35', 15, 'deckcase', 'DeckPro', '100枚収納', { stack: 2 }],
+  ['file9', '9ポケットファイル', 'supply', 480, 800, 12, [0.24, 0.3, 0.03], '🗂️', '#ff8fab', 16, 'binder', 'CollectBook', '9ポケット×10', { bx: 'l' }],
+  ['toploader', 'トップローダー', 'supply', 300, 500, 24, [0.08, 0.11, 0.02], '🛡️', '#c8f0ff', 19, 'loader', 'ClearShield', '10枚入り'],
+  ['counter', 'ダメージカウンター', 'supply', 300, 500, 24, [0.07, 0.07, 0.07], '🔢', '#16a34a', 21, 'dice', 'LuckyRoll', 'カウンター30個', { stack: 2, bx: 's' }],
+  ['playmat2', 'プレイマット（ドラゴン）', 'supply', 1800, 3000, 8, [0.075, 0.3, 0.075], '🐉', '#b91c1c', 24, 'playmat', 'BattleField', '60×35cm', { bx: 'l' }],
+  ['psleeve', 'プレミアムスリーブ', 'supply', 540, 900, 24, [0.075, 0.105, 0.016], '✨', '#c9a227', 28, 'sleeve', 'CardGuard', '80枚入り', { premium: 1 }],
+  ['deckcaseP', 'デッキケース（パール）', 'supply', 1200, 2000, 12, [0.078, 0.102, 0.078], '💠', '#e9e4f5', 32, 'deckcase', 'DeckPro', '100枚収納', { stack: 2 }],
+  ['magloader', 'マグネットローダー', 'supply', 600, 1000, 24, [0.09, 0.12, 0.02], '🧲', '#9fb7ff', 34, 'loader', 'ClearShield', '1枚用'],
+  // グッズ
+  ['plush1', 'チュピのぬいぐるみ', 'goods', 900, 1500, 8, [0.15, 0.16, 0.13], '🐤', '#ffd9a0', 3, 'plush', 'ANIMON', '高さ15cm', { mon: 'chupi' }],
+  ['badge', '缶バッジ（ランダム）', 'goods', 180, 300, 30, [0.06, 0.06, 0.02], '📛', '#ff5d8f', 5, 'badge', 'ANIMON', '全24種'],
+  ['plush2', 'セリックのぬいぐるみ', 'goods', 900, 1500, 8, [0.15, 0.16, 0.13], '🦊', '#ff9a55', 8, 'plush', 'ANIMON', '高さ15cm', { mon: 'cat' }],
+  ['keychain', 'ラバーキーホルダー', 'goods', 240, 400, 24, [0.06, 0.1, 0.02], '🔑', '#4cc9f0', 10, 'badge', 'ANIMON', '全12種'],
+  ['acryl', 'アクリルスタンド', 'goods', 480, 800, 16, [0.08, 0.13, 0.05], '🪧', '#a78bfa', 12, 'acryl', 'ANIMON', '高さ12cm'],
+  ['plush3', 'モコメリーのぬいぐるみ', 'goods', 1200, 2000, 8, [0.17, 0.17, 0.14], '🐑', '#f3efe6', 17, 'plush', 'ANIMON', '高さ18cm', { mon: 'sheep' }],
+  ['figure', 'アニモンフィギュア', 'goods', 1500, 2500, 6, [0.11, 0.17, 0.11], '🗿', '#ffb703', 20, 'figure', 'ANIMON', '全高12cm'],
+  ['poster', 'アニモンポスター', 'goods', 600, 1000, 12, [0.07, 0.3, 0.07], '🖼️', '#06d6a0', 26, 'playmat', 'ANIMON', 'B2サイズ', { bx: 'l' }],
+  ['plushBig', 'ビッグぬいぐるみ（シドーテンペス）', 'goods', 4800, 8000, 4, [0.26, 0.3, 0.22], '🧸', '#7dd3fc', 38, 'plush', 'ANIMON', '高さ40cm', { mon: 'bear', bx: 'l' }],
+  ['figure2', '伝説フィギュア（大）', 'goods', 7200, 12000, 4, [0.16, 0.26, 0.16], '🏆', '#d4af37', 44, 'figure', 'ANIMON', '全高25cm', { bx: 'l' }],
+  // その他
+  ['spray', '消臭スプレー', 'other', 300, 500, 12, [0.06, 0.17, 0.06], '🧴', '#36c08a', 2, 'spray', 'FRESH', '300mL', { stack: 1, lic: 1000 }],
+  ['manga', 'マンガ『アニモン冒険記』1巻', 'other', 300, 500, 24, [0.08, 0.115, 0.018], '📚', '#ef4444', 13, 'manga', 'ANIMON COMICS', '192ページ'],
+  ['boardgame', 'ボードゲーム「アニモンすごろく」', 'other', 1800, 3000, 6, [0.22, 0.06, 0.22], '🎯', '#f97316', 22, 'boardgame', 'ANIMON GAMES', '2〜4人用', { stack: 3, bx: 'l' }],
 ];
+export const PRODUCTS_LIST = [
+  // バラパック（1パック5枚入り）と BOX（10パック入り）
+  ...SERIES.map((s) => P({ id: 'pk' + s.id, name: `${s.name} パック`, short: s.name, cat: 'pack', series: s.id, cost: Math.round(s.price * 0.68), price: s.price, qty: PACK_QTY,
+    size: [0.074, 0.122, 0.012], icon: '🎴', color: s.color, lv: s.lv, lic: s.id === 1 ? 0 : r500(s.price * 25) })),
+  ...SERIES.map((s) => P({ id: 'bx' + s.id, name: `${s.name} BOX`, short: s.name, cat: 'box', series: s.id, cost: Math.round(s.price * 10 * BOX_PREMIUM * 0.7), price: Math.round(s.price * 10 * BOX_PREMIUM), qty: BOXES_PER_CARTON,
+    size: [0.15, 0.09, 0.056], stack: 3, icon: '🎁', color: s.color, lv: Math.max(2, s.boxLv), bx: 'l', lic: r500(s.price * 40) })),
+  ...GOODS.map(([id, name, cat, cost, price, qty, size, icon, color, lv, model, brand, net, extra]) => P({ id, name, cat, cost, price, qty, size, icon, color, lv, model, brand, net, ...(extra || {}),
+    lic: lv <= 1 ? 0 : Math.max(500, r500(cost * qty * 0.5)), ...(extra || {}) })),
+];
+export const SPRAY_ID = 'spray';
+export const SPRAY_USES = 20; // 手で使うと1本で20回スプレーできる
 // レジのベルトやお客さんのかごにだけ出る「商品」（シングルカード・プレイ料金）。発注はできない
 const PSEUDO = [
   { id: '_card', name: 'シングルカード', cat: '', place: [], cost: 0, price: 0, qty: 1, max: 1, size: [0.07, 0.1, 0.004], icon: '🃏', color: '#4a6cf7', lv: 999, hidden: true },
@@ -172,6 +208,7 @@ export const boxProd = (pid) => PRODUCTS[pid] || EMPTY_BOX;
 export const boxLook = (b) => (b.n > 0 && PRODUCTS[b.p] ? b.p : EMPTY_BOX.id);
 export const isPack = (pid) => /^pk\d$/.test(pid || '');
 export const isBoosterBox = (pid) => /^bx\d$/.test(pid || '');
+export const isSpray = (pid) => pid === 'spray';
 
 // ---------- 設備 ----------
 function shelfSlots(levels, ys, w, d, h, cols, kind = 'gen', sides = [1], depth = 0.5) {
@@ -209,6 +246,15 @@ export const FIXTURES = {
   wide: F({ name: 'ワイドシェルフ', cat: 'shelf', icon: '🛋️', price: 30000, w: 3, d: 1, place: 'sales', lv: 30, attract: 0.06,
     slots: shelfSlots(2, [0.3, 0.72], 3, 0.42, 0.38, 3, 'gen', [1, -1], 1), desc: '腰の高さの大きな棚。見通しがよく、お客さんが増える（12枠）' }),
   // ---- シングルカード販売 ----
+  cardshelf: F({ name: 'シングルカード棚', cat: 'cardsale', icon: '🪜', price: 3500, w: 1, d: 0.5, place: 'sales', lv: 1,
+    cards: [...cardGrid(4, 1, -0.36, 0.24, [0.74], [0.12], 0.32), ...cardGrid(4, 1, -0.36, 0.24, [1.0], [0.02], 0.26), ...cardGrid(4, 1, -0.36, 0.24, [1.26], [-0.08], 0.2)],
+    desc: 'ひな壇にシングルカードを12枚立てて売る、いちばん手軽な棚' }),
+  smalldisp: F({ name: 'スモールカードディスプレイ', cat: 'cardsale', icon: '🔳', price: 7000, w: 1, d: 0.6, place: 'sales', lv: 8,
+    cards: cardGrid(4, 2, -0.33, 0.22, [0.9, 0.94], [0.1, -0.08], 1.2), desc: 'ガラスのふたの小さなショーケース（8枚）' }),
+  cardtower: F({ name: 'カードタワーケース', cat: 'cardsale', icon: '🗼', price: 14000, w: 1, d: 0.6, place: 'sales', lv: 15, attract: 0.02,
+    cards: [0.5, 0.86, 1.22, 1.58].flatMap((y) => cardGrid(3, 1, -0.28, 0.28, [y], [0.04], 0.15)), desc: '4段の背の高いガラスタワー（12枚・お店の雰囲気アップ）' }),
+  walldisp2: F({ name: '壁掛けディスプレイケース（2×4）', cat: 'cardsale', icon: '🖼️', price: 9000, w: 1.3, d: 0.3, place: 'sales', lv: 28,
+    cards: cardGrid(4, 2, -0.45, 0.3, [1.17, 1.43], [-0.07, -0.07], 0), desc: '壁にかける横長の額縁ケース（8枚）' }),
   cardtable: F({ name: 'カードテーブル', cat: 'cardsale', icon: '🃏', price: 4000, w: 1.5, d: 0.75, place: 'sales', lv: 2,
     cards: cardGrid(5, 2, -0.52, 0.26, [0.86, 0.9], [0.17, -0.05], 1.15), desc: 'シングルカードを10枚並べて売るテーブル' }),
   walldisp: F({ name: '壁掛けディスプレイケース', cat: 'cardsale', icon: '🖼️', price: 5000, w: 1, d: 0.3, place: 'sales', lv: 12,
@@ -234,8 +280,16 @@ export const FIXTURES = {
     boxSlots: [0.08, 0.62, 1.16, 1.7].flatMap((y) => [-1.08, -0.36, 0.36, 1.08].map((x) => ({ x, y, z: 0 }))), desc: '16箱置ける大きなラック' }),
   trash: F({ name: 'ゴミ箱', cat: 'storage', icon: '🗑️', price: 800, w: 0.5, d: 0.5, place: 'any', lv: 1, desc: '空の段ボールを捨てられる' }),
   dumpster: F({ name: '大型ゴミ箱', cat: 'storage', icon: '🗑️', price: 3500, w: 1.5, d: 0.9, place: 'any', lv: 1, desc: '空の段ボールを捨てる大きなゴミ箱' }),
+  // ---- 消臭（オートセント：消臭スプレーをセットすると、近くを通った臭いお客さんに自動でスプレー） ----
+  // range：届く距離(m)　cd：スプレーの間隔(秒)　cans：セットできる本数　use：1回で使う量（1本＝1）　pot：消臭のつよさ（臭い10）
+  scent1: F({ name: 'オートセント M100', cat: 'clean', icon: '🌬️', price: 5000, w: 0.5, d: 0.5, place: 'any', lv: 5,
+    scent: { range: 2.1, cd: 8, cans: 2, use: 0.05, pot: 5 }, desc: '自動消臭機。スプレー間隔8秒・2本セット・1回で臭いを半分消す' }),
+  scent2: F({ name: 'オートセント G500', cat: 'clean', icon: '🌀', price: 15000, w: 0.5, d: 0.5, place: 'any', lv: 18,
+    scent: { range: 2.4, cd: 5, cans: 4, use: 0.1, pot: 10 }, desc: '自動消臭機。スプレー間隔5秒・4本セット・1回で臭いを消す' }),
+  scent3: F({ name: 'オートセント T1000', cat: 'clean', icon: '💨', price: 40000, w: 0.5, d: 0.5, place: 'any', lv: 40,
+    scent: { range: 2.8, cd: 2.5, cans: 7, use: 0.1, pot: 10 }, desc: '自動消臭機。スプレー間隔2.5秒・7本セット・広い範囲' }),
   // ---- 固定の設備 ----
-  mboard: F({ name: 'マネージャーボード', cat: 'fixed', icon: '📋', price: 0, w: 2, d: 0.5, place: 'any', fixed: true, desc: '発注・従業員・お店の設定' }),
+  pc: F({ name: 'パソコン', cat: 'fixed', icon: '💻', price: 0, w: 1.6, d: 0.8, place: 'any', fixed: true, desc: '仕入れ・ライセンス・従業員・お店の設定' }),
   fboard: F({ name: 'カード相場ボード', cat: 'fixed', icon: '📈', price: 0, w: 2, d: 0.5, place: 'any', fixed: true, desc: 'シングルカードの相場・コレクション' }),
   xboard: F({ name: '店舗拡張ボード', cat: 'fixed', icon: '🗺️', price: 0, w: 1.5, d: 0.5, place: 'any', fixed: true, desc: '売り場・倉庫を買い足す' }),
   opensign: F({ name: '入口の看板', cat: 'fixed', icon: '🪧', price: 0, w: 0.6, d: 0.5, place: 'any', fixed: true, desc: 'OPENにすると営業スタート' }),
@@ -253,7 +307,7 @@ export const FIXTURES = {
   hangsign: F({ name: '吊り看板', cat: 'sign', icon: '🎌', price: 3000, w: 1.5, d: 0.5, place: 'any', lv: 7, text: true, air: true, desc: '天井から吊るす両面の看板。好きな文字と色にできる（下を通れて、棚の上にも吊るせる）' }),
   neon: F({ name: 'ネオン看板', cat: 'sign', icon: '💡', price: 4500, w: 1, d: 0.5, place: 'any', lv: 9, text: true, desc: '光る文字の看板' }),
 };
-export const FIXTURE_CATS = { shelf: '陳列棚', cardsale: 'カード販売', play: '対戦', checkout: 'レジ', storage: '倉庫', deco: '装飾', sign: '看板' };
+export const FIXTURE_CATS = { shelf: '陳列棚', cardsale: 'カード販売', play: '対戦', checkout: 'レジ', storage: '倉庫', clean: '消臭', deco: '装飾', sign: '看板' };
 for (const [id, f] of Object.entries(FIXTURES)) { f.id = id; (f.slots || []).forEach((s, i) => (s.key = id + i)); }
 
 export function fixtureFootprint(fx, x, z, r) {
@@ -403,8 +457,9 @@ export function cardAccess(f, ci) { const def = FIXTURES[f.t], s = def.cards[ci]
 export function seatSpot(f, si) { const def = FIXTURES[f.t], [x, z] = def.seats[si]; return localToWorld(f, x, z); }
 
 // ---------- 従業員 ----------
-// 仕事は「レジ係」と「品出し係」。1人ひとりに得意な仕事があり、得意でない仕事をすると遅くなる
+// 仕事は「レジ」と「品出し」。だれでもどちらもできるが、1人ひとりレジと品出しの得意さ（はやさ）がちがう
 export const STAFF_ROLES = {
+  both: { name: '両方（おまかせ）', icon: '🔄', desc: 'レジにお客さんが並んだらレジへ、空いている時間は品出し' },
   cashier: { name: 'レジ係', icon: '🧾', desc: '空いているレジで会計をする' },
   stocker: { name: '品出し係', icon: '📦', desc: '届いた段ボールをラベルの貼ってある倉庫棚へ運び、値札のついた棚が減ったら補充する' },
 };
@@ -417,26 +472,31 @@ export const SPEEDS = [
   { id: 4, name: '早い', icon: '🏃', k: 1.45, wage: 2100 },
   { id: 5, name: 'とても早い', icon: '⚡', k: 2.0, wage: 2800 },
 ];
-export const OFF_ROLE = 0.6; // 得意でない仕事をするときのはやさ
-// 雇える人（No.1〜10）。お店のレベルが上がると1人ずつ雇えるようになる
+// 雇える人（No.1〜10）。reg：レジのはやさ　stk：品出しのはやさ（両方同じ人もいる）
+// lic：雇用ライセンス（お店のレベルが届いたら、お金を払ってライセンスを買うと雇える）
 export const STAFF_SLOTS = [
-  { no: 1, lv: 5, spd: 1, role: 'stocker' },
-  { no: 2, lv: 8, spd: 1, role: 'cashier' },
-  { no: 3, lv: 12, spd: 2, role: 'stocker' },
-  { no: 4, lv: 16, spd: 2, role: 'cashier' },
-  { no: 5, lv: 20, spd: 3, role: 'stocker' },
-  { no: 6, lv: 25, spd: 3, role: 'cashier' },
-  { no: 7, lv: 30, spd: 5, role: 'cashier' },
-  { no: 8, lv: 36, spd: 4, role: 'stocker' },
-  { no: 9, lv: 43, spd: 4, role: 'cashier' },
-  { no: 10, lv: 50, spd: 5, role: 'stocker' },
+  { no: 1, lv: 5, reg: 1, stk: 1, lic: 5000 },
+  { no: 2, lv: 8, reg: 2, stk: 1, lic: 8000 },
+  { no: 3, lv: 12, reg: 1, stk: 3, lic: 12000 },
+  { no: 4, lv: 16, reg: 3, stk: 2, lic: 16000 },
+  { no: 5, lv: 20, reg: 3, stk: 3, lic: 20000 },
+  { no: 6, lv: 25, reg: 2, stk: 4, lic: 25000 },
+  { no: 7, lv: 30, reg: 5, stk: 2, lic: 35000 },
+  { no: 8, lv: 36, reg: 4, stk: 4, lic: 40000 },
+  { no: 9, lv: 43, reg: 3, stk: 5, lic: 50000 },
+  { no: 10, lv: 50, reg: 5, stk: 5, lic: 60000 },
 ];
+export const hasStaffLicense = (store, no) => !!store?.slic?.[no];
 export const STAFF_MAX = STAFF_SLOTS.length;
 export const staffSlotOpen = (level, no) => (level || 1) >= (STAFF_SLOTS[no - 1]?.lv ?? 999);
 export const staffLimit = (level) => STAFF_SLOTS.filter((s) => (level || 1) >= s.lv).length;
-// その人の今の仕事でのはやさ（得意でない仕事なら遅くなる）
-export const staffK = (s) => (SPEEDS[s.spd || 1]?.k || 0.5) * (s.role === s.fav ? 1 : OFF_ROLE);
-export const staffWage = (spd) => SPEEDS[spd || 1]?.wage || 800;
+// その人のその仕事のはやさ（job：'cashier'＝レジ／それ以外＝品出し）
+export const staffSpd = (s, job) => (job === 'cashier' ? s.reg : s.stk) || 1;
+export const staffK = (s, job) => SPEEDS[staffSpd(s, job)]?.k || 0.5;
+export const WAGE_MULT = 2; // 日給は、はやさの表（SPEEDS）の2倍
+export const staffWage = (reg, stk) => Math.round(((SPEEDS[reg || 1]?.wage || 800) + (SPEEDS[stk || reg || 1]?.wage || 800)) / 2 * WAGE_MULT / 100) * 100;
+// 得意な仕事（同じなら null）
+export const staffFav = (s) => (s.reg > s.stk ? 'cashier' : s.stk > s.reg ? 'stocker' : null);
 export const TRASH_TYPES = ['trash', 'dumpster'];
 export const STAFF_NAMES = ['たなか', 'すずき', 'さとう', 'やまだ', 'こばやし', 'いとう', 'わたなべ', 'なかむら', 'かとう', 'よしだ', 'まつもと', 'いのうえ', 'きむら', 'はやし', 'しみず', 'もり', 'あべ', 'いけだ', 'はしもと', 'やまもと'];
 
@@ -448,13 +508,16 @@ export function xpNeed(level) { return Math.round((180 * Math.pow(1.09, level - 
 export function checkoutLimit(level) { return level >= 35 ? 6 : level >= 25 ? 4 : level >= 15 ? 3 : level >= 6 ? 2 : 1; }
 export const CHECKOUT_LV = [[6, 2], [15, 3], [25, 4], [35, 6]];
 export function productUnlocked(pid, level) { const p = PRODUCTS[pid]; return !!p && !p.hidden && (level || 1) >= (p.lv || 1); }
+// ライセンスを持っているか（レベルが届いて、ライセンスを買った商品だけ仕入れられる）
+export const hasLicense = (store, pid) => !!PRODUCTS[pid] && (!PRODUCTS[pid].lic || !!store?.lic?.[pid]);
+export const canOrder = (store, pid) => productUnlocked(pid, store?.level) && hasLicense(store, pid);
 export function fixtureUnlocked(t, level) { const f = FIXTURES[t]; return !!f && !f.fixed && (level || 1) >= (f.lv || 1); }
 // そのレベルで新しくできるようになること（レベルアップの知らせ・レベルの画面用）
 export function unlocksAt(lv) {
   const out = [];
-  for (const p of PRODUCTS_LIST) if (p.lv === lv && lv > 1) out.push({ k: 'prod', icon: p.cat === 'pack' ? '🎴' : p.cat === 'box' ? '🎁' : p.icon, name: p.name });
+  for (const p of PRODUCTS_LIST) if (p.lv === lv && lv > 1) out.push({ k: 'prod', icon: p.cat === 'pack' ? '🎴' : p.cat === 'box' ? '🎁' : p.icon, name: `${p.name}${p.lic ? `（ライセンス ¥${p.lic.toLocaleString()}）` : ''}` });
   for (const [, f] of Object.entries(FIXTURES)) if (!f.fixed && f.lv === lv && lv > 1) out.push({ k: 'fx', icon: f.icon, name: f.name });
-  for (const s of STAFF_SLOTS) if (s.lv === lv) out.push({ k: 'staff', icon: SPEEDS[s.spd].icon, name: `従業員 No.${s.no}（${SPEEDS[s.spd].name}・${STAFF_ROLES[s.role].name}が得意）` });
+  for (const s of STAFF_SLOTS) if (s.lv === lv) out.push({ k: 'staff', icon: SPEEDS[Math.max(s.reg, s.stk)].icon, name: `従業員 No.${s.no} の雇用ライセンス ¥${s.lic.toLocaleString()}（🧾レジ:${SPEEDS[s.reg].name}・📦品出し:${SPEEDS[s.stk].name}）` });
   for (const [l, n] of CHECKOUT_LV) if (l === lv) out.push({ k: 'reg', icon: '🧾', name: `レジを${n}台まで置ける` });
   return out;
 }

@@ -3,10 +3,11 @@ import {
   PRODUCTS, PRODUCTS_LIST, FIXTURES, STAFF_ROLES, STAFF_NAMES, BOX_SIZES, DELIVERY_AREA,
   OPEN_TIME, GAME_MIN_PER_SEC, SPAWN_POINTS, PLAYER_BOUNDS, START_BAYS, START_STOCK, STAFF_HOME, STOCK_SECTIONS, bayAt, doorOpen, snapFixture,
   getWalls, zones, keepClear, expandTargets, fixtureFootprint, marketPrice, marketCost, slotCapacity, slotAccess, rackAccess, checkoutSpot, canPlace,
-  STAFF_SLOTS, SPEEDS, staffK, staffWage, staffSlotOpen, checkoutLimit, closeTime, xpNeed, productUnlocked, fixtureUnlocked, localToWorld, CELL, TRASH_TYPES, ORDER_MAX_BOXES, SHIPPING_FEE,
+  STAFF_SLOTS, SPEEDS, staffK, staffSpd, staffWage, staffSlotOpen, checkoutLimit, closeTime, xpNeed, productUnlocked, fixtureUnlocked, localToWorld, CELL, TRASH_TYPES, ORDER_MAX_BOXES, SHIPPING_FEE,
   MAX_LEVEL, boxUnits, MANAGER, XP_YEN, BUILDING, EMPTY_BOX, EMPTY_BOX_PRICE, boxProd, boxLook, isPack, isBoosterBox, cardAccess, seatSpot, unlocksAt, PLAY_FEE, PLAY_FEE_MAX,
+  canOrder, hasLicense, isSpray, SPRAY_ID, staffFav, slotPositions, hasStaffLicense,
 } from './data.js';
-import { CARDS, CARDS_LIST, openPack, openBox, cardValue, cardLimit, cardPrice, updateCardMarket, buybackPrice, seriesOfProduct, rarityOrder, isHit, cardRank, baseId } from './cards.js';
+import { CARDS, CARDS_LIST, BOX_PACKS, openPack, openBox, cardValue, cardLimit, cardPrice, updateCardMarket, buybackPrice, seriesOfProduct, rarityOrder, isHit, cardRank, baseId } from './cards.js';
 import { NavGrid } from './nav.js';
 import { rand, randi, pick, dist, dist2, clamp } from './util.js';
 
@@ -23,15 +24,17 @@ export function newStore(name) {
     boxes: [], reviews: [], crates: [],
     // カード：持っている枚数・図鑑（一度でも手に入れたカード）・自分で決めた値段・相場の変動
     cards: {}, dex: {}, cprices: {}, cmk: {}, cmkPrev: {}, playFee: PLAY_FEE,
-    stats: { packs: 0, boxes: 0, cardsSold: 0, played: 0 },
+    stats: { packs: 0, boxes: 0, cardsSold: 0, played: 0, sprayed: 0 },
+    // ライセンス（買った商品だけ仕入れられる）・手に持っている物（パック最大5／BOX1つ／消臭スプレー1本）
+    lic: {}, hand: {}, slic: {},
   };
   return st;
 }
-const newToday = () => ({ sales: 0, served: 0, lost: 0, orders: 0, ship: 0, xp: 0, vend: 0, recycle: 0, cardSales: 0, playSales: 0, buyback: 0, packs: 0 });
+const newToday = () => ({ sales: 0, served: 0, lost: 0, orders: 0, ship: 0, xp: 0, vend: 0, recycle: 0, cardSales: 0, playSales: 0, buyback: 0, packs: 0, lic: 0, smelly: 0, cleaned: 0, smellLost: 0 });
 function initialFixtures() {
   return [
-    // パソコン室（入口の右）：正面の壁にマネージャーボード、左右の壁にカード相場ボードと拡張ボード
-    { id: 1, t: 'mboard', x: 10, z: 5.62, r: 2 },
+    // パソコン室（入口の右）：正面の壁ぎわにパソコンの机、左右の壁にカード相場ボードと拡張ボード
+    { id: 1, t: 'pc', x: 10, z: 5.4, r: 2 },
     { id: 2, t: 'fboard', x: 14.62, z: 3.5, r: 3 },
     { id: 3, t: 'xboard', x: 5.38, z: 3.5, r: 1 },
     { id: 4, t: 'recycle', x: 16.4, z: 3, r: 1 }, // 建物の右の外（搬入口から出てすぐ）
@@ -61,6 +64,13 @@ export function normalizeStore(st) {
   st.bays ||= Object.fromEntries(START_BAYS.map((b) => [b, 1])); st.stock ||= Object.fromEntries(START_STOCK.map((b) => [b, 1]));
   st.prices ||= {}; st.staff ||= []; st.boxes ||= []; st.fixtures ||= [];
   st.cards ||= {}; st.dex ||= {}; st.cprices ||= {}; st.cmk ||= {}; st.cmkPrev ||= {}; st.playFee ??= PLAY_FEE;
+  // ライセンス：前のセーブデータは、レベルで入荷できていた商品のライセンスを持っていることにする
+  if (!st.lic) { st.lic = {}; for (const p of PRODUCTS_LIST) if (productUnlocked(p.id, st.level || 1)) st.lic[p.id] = 1; }
+  for (const k of Object.keys(st.lic)) if (!PRODUCTS[k]) delete st.lic[k];
+  st.hand ||= {};
+  // 従業員の雇用ライセンス：前のデータで雇っていた人の枠はライセンスを持っていることにする
+  if (!st.slic) { st.slic = {}; for (const s of st.staff || []) if (s.slot) st.slic[s.slot] = 1; }
+  for (const [k, hd] of Object.entries(st.hand)) if (!hd || !handOk(hd)) delete st.hand[k];
   st.stats = { packs: 0, boxes: 0, cardsSold: 0, played: 0, ...(st.stats || {}) };
   st.today = { ...newToday(), ...(st.today || {}) };
   st.rev ||= 1; st.level = clamp(st.level || 1, 1, MAX_LEVEL); st.xp ||= 0;
@@ -68,14 +78,23 @@ export function normalizeStore(st) {
   for (const c of st.crates) if (c.loc?.t !== 'f') c.loc = crateSpot(st); // 持ったままの大きい段ボールは店の前に戻す
   if (st.phase !== 'prep' && st.phase !== 'summary') { st.phase = 'prep'; st.time = OPEN_TIME; }
   if (st.phase === 'summary') { st.phase = 'prep'; st.day++; st.time = OPEN_TIME; st.today = newToday(); }
+  for (const f of st.fixtures) if (f.t === 'mboard') { f.t = 'pc'; f.z = 5.4; } // 前のマネージャーボード → パソコン
   st.fixtures = st.fixtures.filter((f) => FIXTURES[f.t]);
   for (const f of st.fixtures) {
     const def = FIXTURES[f.t];
     if (def.slots) { f.s ||= emptySlots(f.t); while (f.s.length < def.slots.length) f.s.push([null, 0]); f.s = f.s.slice(0, def.slots.length).map((x) => (Array.isArray(x) && (!x[0] || PRODUCTS[x[0]]) ? [x[0] ?? null, x[1] || 0] : [null, 0])); }
     if (def.boxSlots) { f.lb ||= emptyLabels(f.t); while (f.lb.length < def.boxSlots.length) f.lb.push(null); f.lb = f.lb.map((p) => (PRODUCTS[p] ? p : null)); }
+    if (def.scent) f.sp = (Array.isArray(f.sp) ? f.sp : []).filter((u) => u > 0.001).slice(0, def.scent.cans);
     if (def.cards) { f.cs ||= emptyCards(f.t); while (f.cs.length < def.cards.length) f.cs.push(null); f.cs = f.cs.slice(0, def.cards.length).map((c) => (CARDS[c] ? c : null)); }
   }
-  for (const s of st.staff) { s.spd ||= 1; s.fav ||= s.role || 'stocker'; if (!STAFF_ROLES[s.role]) s.role = s.fav; s.wage = staffWage(s.spd); }
+  for (const s of st.staff) {
+    // 従業員：レジと品出しのはやさを別々に持つ（前のデータは雇った枠の値にする）
+    const sl = STAFF_SLOTS.find((o) => o.no === s.slot);
+    if (!s.reg || !s.stk) { s.reg = sl?.reg || s.spd || 1; s.stk = sl?.stk || s.spd || 1; }
+    delete s.spd; delete s.fav;
+    if (!STAFF_ROLES[s.role]) s.role = 'both';
+    s.wage = staffWage(s.reg, s.stk);
+  }
   for (const [k, n] of Object.entries(st.cards)) if (!CARDS[k] || !(n > 0)) delete st.cards[k]; else st.dex[baseId(k)] = 1;
   for (const k of Object.keys(st.dex)) if (!CARDS[k] || CARDS[k].flash) delete st.dex[k];
   st.boxes = st.boxes.filter((b) => PRODUCTS[b.p] || (b.p === EMPTY_BOX.id && !b.n));
@@ -91,6 +110,7 @@ function newFixture(st, t, x, z, r) {
   if (def.slots) f.s = emptySlots(t);
   if (def.boxSlots) f.lb = emptyLabels(t);
   if (def.cards) f.cs = emptyCards(t);
+  if (def.scent) f.sp = [];
   if (def.text) { f.tx = t === 'banner' ? 'カードパック' : t === 'neon' ? 'OPEN' : t === 'hangsign' ? '新弾入荷！' : 'いらっしゃいませ'; f.c = t === 'neon' ? '#ff4fd8' : '#ffffff'; }
   return f;
 }
@@ -125,6 +145,21 @@ function deliverySpot(st, k) {
   return { t: 'f', x: A.minX + 0.35 + (i % cols) * 0.7 + (j - 0.5) * 0.08, y: layer * 0.42, z: A.minZ + 0.3 + Math.floor(i / cols) * 0.56 + (j - 0.5) * 0.06, ry: (j - 0.5) * 0.5 };
 }
 
+// ---------- 手に持つ物（パック最大5・BOX1つ・消臭スプレー1本） ----------
+export const HAND_MAX = 5;
+const SPRAY_USES_HAND = 20; // 手で使うと1本で20回
+function handOk(hd) {
+  if (hd.t === 'packs') return Array.isArray(hd.a) && hd.a.length > 0 && hd.a.every(isPack);
+  if (hd.t === 'box') return isBoosterBox(hd.p);
+  if (hd.t === 'spray') return hd.u > 0.001;
+  return false;
+}
+export const handPid = (hd) => (!hd ? null : hd.t === 'packs' ? hd.a[hd.a.length - 1] : hd.p);
+export const handCount = (hd) => (!hd ? 0 : hd.t === 'packs' ? hd.a.length : 1);
+const inStore = (c) => c.z < 6 && c.x > BUILDING.minX && c.x < BUILDING.maxX;
+// 臭いお客さんの出る確率（お店 Lv.2 から）
+export const smellRate = (lv) => (lv >= 2 ? Math.min(0.18, 0.1 + lv * 0.002) : 0);
+
 export function newDyn() { return { customers: [], staffRt: {}, regs: {}, deliveries: [], spawnT: 3, cid: 1, seats: {} }; }
 const BUBBLE_T = 2.6;
 const DELIVERY_SEC = 8;
@@ -157,6 +192,8 @@ export class Sim {
   fx(id) { return this.store.fixtures.find((f) => f.id === id); }
   box(id) { return this.store.boxes.find((b) => b.id === id); }
   heldBox(who) { return this.store.boxes.find((b) => b.loc.t === 'h' && b.loc.who === who); }
+  hand(uid) { return this.store.hand?.[uid] || null; }
+  setHand(uid, hd) { this.store.hand ||= {}; if (hd) this.store.hand[uid] = hd; else delete this.store.hand[uid]; }
   reg(fid) { return (this.dyn.regs[fid] ||= { q: [], op: null, belt: [], ph: 'idle', pay: null, cust: null }); }
   get level() { return this.store.level || 1; }
 
@@ -168,6 +205,7 @@ export class Sim {
   }
   a_pick(uid, a) {
     if (this.heldBox(uid) || this.heldCrate(uid)) return this.err(uid, 'すでに箱を持っています');
+    if (this.hand(uid)) return this.err(uid, '手に持っている物を棚に置くか、開封してから持とう');
     const b = this.box(a.bid);
     if (!b || b.loc.t === 'h') return;
     if (b.loc.t === 'f') { // 上に積まれた箱があれば上から取る
@@ -284,7 +322,7 @@ export class Sim {
   }
   a_order(uid, a) {
     if (!this.atBoard(uid)) return this.err(uid, BOARD_ONLY);
-    const items = (a.items || []).filter(([p, n]) => n > 0 && (p === EMPTY_BOX.id || productUnlocked(p, this.level))).map(([p, n, half]) => [p, Math.min(ORDER_MAX_BOXES, n | 0), half && p !== EMPTY_BOX.id ? 1 : 0]);
+    const items = (a.items || []).filter(([p, n]) => n > 0 && (p === EMPTY_BOX.id || canOrder(this.store, p))).map(([p, n, half]) => [p, Math.min(ORDER_MAX_BOXES, n | 0), half && p !== EMPTY_BOX.id ? 1 : 0]);
     if (!items.length) return;
     const boxes = items.reduce((t, [, n]) => t + n, 0);
     if (boxes > ORDER_MAX_BOXES) return this.err(uid, `1回の配達は最大${ORDER_MAX_BOXES}箱までです`);
@@ -293,6 +331,30 @@ export class Sim {
     this.store.money -= cost; this.store.today.orders += goods; this.store.today.ship = (this.store.today.ship || 0) + SHIPPING_FEE;
     this.dyn.deliveries.push({ t: DELIVERY_SEC, items });
     this.toast(null, `発注しました！${DELIVERY_SEC}秒ほどで店の前に届きます`, 'ok');
+    this.sfx('cash'); this.bump();
+  }
+  // 従業員の雇用ライセンスを買う（レベルが届いた枠だけ。買うとその人を雇える）
+  a_staffLicense(uid, a) {
+    if (!this.atBoard(uid)) return this.err(uid, BOARD_ONLY);
+    const st = this.store, sl = STAFF_SLOTS.find((o) => o.no === (a.slot | 0));
+    if (!sl) return;
+    if (hasStaffLicense(st, sl.no)) return this.err(uid, 'もうライセンスを持っています');
+    if (!staffSlotOpen(this.level, sl.no)) return this.err(uid, `お店のレベル${sl.lv}になると買えます`);
+    if (sl.lic > st.money) return this.err(uid, 'お金が足りません');
+    st.money -= sl.lic; st.slic[sl.no] = 1; st.today.lic = (st.today.lic || 0) + sl.lic;
+    this.toast(null, `🔑 従業員 No.${sl.no} の雇用ライセンスを買いました！雇えるようになりました`, 'ok');
+    this.sfx('cash'); this.bump();
+  }
+  // ライセンスを買う（レベルが届いた商品だけ。買うと仕入れられる）
+  a_license(uid, a) {
+    if (!this.atBoard(uid)) return this.err(uid, BOARD_ONLY);
+    const st = this.store, p = PRODUCTS[a.pid];
+    if (!p || p.hidden) return;
+    if (hasLicense(st, p.id)) return this.err(uid, 'もうライセンスを持っています');
+    if (!productUnlocked(p.id, this.level)) return this.err(uid, `お店のレベル${p.lv}になると買えます`);
+    if (p.lic > st.money) return this.err(uid, 'お金が足りません');
+    st.money -= p.lic; st.lic[p.id] = 1; st.today.lic = (st.today.lic || 0) + p.lic;
+    this.toast(null, `🔑「${p.name}」のライセンスを買いました！仕入れられます`, 'ok');
     this.sfx('cash'); this.bump();
   }
   // 設備を買う：店の前に大きい段ボールで届く（持って置きたい場所で開けると設置される）
@@ -311,6 +373,7 @@ export class Sim {
   crate(id) { return this.store.crates.find((c) => c.id === id); }
   a_cratePick(uid, a) {
     if (this.heldBox(uid) || this.heldCrate(uid)) return this.err(uid, 'すでに箱を持っています');
+    if (this.hand(uid)) return this.err(uid, '手に持っている物を棚に置くか、開封してから持とう');
     const c = this.crate(a.cid);
     if (!c || c.loc.t === 'h') return;
     c.loc = { t: 'h', who: uid }; delete c.drop;
@@ -464,11 +527,13 @@ export class Sim {
     const st = this.store, sl = STAFF_SLOTS.find((o) => o.no === (a.slot | 0));
     if (!sl) return;
     if (!staffSlotOpen(this.level, sl.no)) return this.err(uid, `お店のレベル${sl.lv}になると雇えます`);
+    if (!hasStaffLicense(st, sl.no)) return this.err(uid, `先に No.${sl.no} の雇用ライセンスを買ってください`);
     if (st.staff.some((o) => o.slot === sl.no)) return this.err(uid, 'その人はもう雇っています');
     const seed = (a.seed >>> 0) || randi(1, 1e9);
-    const s = { id: st.nid++, role: sl.role, fav: sl.role, name: staffName(a.name) || pick(STAFF_NAMES), seed, slot: sl.no, spd: sl.spd, wage: staffWage(sl.spd) };
+    const role = STAFF_ROLES[a.role] ? a.role : 'both';
+    const s = { id: st.nid++, role, reg: sl.reg, stk: sl.stk, name: staffName(a.name) || pick(STAFF_NAMES), seed, slot: sl.no, wage: staffWage(sl.reg, sl.stk) };
     st.staff.push(s);
-    this.toast(null, `${SPEEDS[sl.spd].icon}「${SPEEDS[sl.spd].name}」${s.name}さんを${STAFF_ROLES[s.role].name}として雇いました！（日給 ¥${s.wage.toLocaleString()}）`, 'ok');
+    this.toast(null, `${s.name}さんを雇いました！（🧾レジ：${SPEEDS[s.reg].name}・📦品出し：${SPEEDS[s.stk].name}・日給 ¥${s.wage.toLocaleString()}）`, 'ok');
     this.sfx('bell'); this.bump();
   }
   a_staffName(uid, a) {
@@ -478,14 +543,16 @@ export class Sim {
     this.toast(null, `${s.name}さんの名前を「${name}」にしました`, 'ok');
     s.name = name; this.bump();
   }
-  // 仕事を変える（得意でない仕事にすると遅くなる）
+  // 仕事を変える（両方おまかせ／レジ係／品出し係）。はやさは人ごとに、レジと品出しでちがう
   a_staffRole(uid, a) {
     if (!this.atBoard(uid)) return this.err(uid, BOARD_ONLY);
     const s = this.store.staff.find((o) => o.id === a.sid), role = STAFF_ROLES[a.role];
     if (!s || !role || s.role === a.role) return;
     this.releaseStaff(s);
     s.role = a.role;
-    this.toast(null, `${s.name}さんを${role.name}にしました${s.role === s.fav ? '（得意な仕事！）' : '（得意ではないので少し遅くなります）'}`, 'ok');
+    const msg = a.role === 'both' ? `${s.name}さんはレジと品出しの両方をおまかせにしました`
+      : `${s.name}さんを${role.name}にしました（はやさ：${SPEEDS[a.role === 'cashier' ? s.reg : s.stk].name}）`;
+    this.toast(null, msg, 'ok');
     this.bump();
   }
   releaseStaff(s) {
@@ -493,7 +560,7 @@ export class Sim {
     const b = this.heldBox(who);
     if (b) b.loc = { t: 'f', x: rt?.x ?? STAFF_HOME[0], y: this.stackHeight(rt?.x ?? STAFF_HOME[0], rt?.z ?? STAFF_HOME[1], b), z: rt?.z ?? STAFF_HOME[1], ry: 0 };
     for (const fid in this.dyn.regs) if (this.dyn.regs[fid].op === who) this.dyn.regs[fid].op = null;
-    if (rt) { rt.st = 'idle'; rt.t = 0.5; rt.path = null; rt.bid = null; rt.fid = null; rt.msg = null; }
+    if (rt) { rt.st = 'idle'; rt.t = 0.5; rt.path = null; rt.bid = null; rt.fid = null; rt.msg = null; rt.job = null; }
   }
   a_fire(uid, a) {
     if (!this.atBoard(uid)) return this.err(uid, BOARD_ONLY);
@@ -554,18 +621,150 @@ export class Sim {
   }
 
   // ---------- カード：開封・陳列・値段・買取 ----------
-  // 持っている段ボールから1パック（または1BOX）開ける
-  a_openPack(uid) {
-    const b = this.heldBox(uid), st = this.store;
+  // 持っている段ボールから開封：パックはその場で1パック。BOXは段ボールを足元に置いて、BOXを開ける（10パックが手に出てくる）
+  a_openPack(uid, a = {}) {
+    const b = this.heldBox(uid);
     if (!b || b.n <= 0) return;
     const sid = seriesOfProduct(b.p); if (!sid) return;
     if (!b.o) return this.err(uid, '段ボールを開けてから開封しよう');
+    if (isPack(b.p)) {
+      b.n--;
+      this.gainCards(uid, [openPack(sid)], 'pack', sid);
+      this.sfx('tear'); this.bump();
+      return;
+    }
+    if (this.hand(uid)) return this.err(uid, '手がふさがっています');
     b.n--;
-    const packs = isPack(b.p) ? [openPack(sid)] : openBox(sid);
-    this.gainCards(uid, packs, isPack(b.p) ? 'pack' : 'box', sid);
+    const p = this.players[uid], x = clamp(+(a.x ?? p?.x ?? 0), PLAYER_BOUNDS.minX, PLAYER_BOUNDS.maxX), z = clamp(+(a.z ?? p?.z ?? 0), PLAYER_BOUNDS.minZ, PLAYER_BOUNDS.maxZ);
+    b.loc = { t: 'f', x, y: this.stackHeight(x, z, b), z, ry: +a.ry || 0 };
+    this.setHand(uid, { t: 'box', p: b.p });
+    this.a_handBoxOpen(uid);
+  }
+  // 棚の枠や、開いている段ボールから手に持つ（パック最大5・BOX1つ・消臭スプレー1本）
+  a_handTake(uid, a) {
+    if (this.heldBox(uid) || this.heldCrate(uid)) return this.err(uid, '段ボールを持っていると手に取れません');
+    let src;
+    if (a.bid != null) {
+      const b = this.box(a.bid);
+      if (!b || b.loc.t === 'h' || b.n <= 0) return;
+      if (!b.o) return this.err(uid, '段ボールを開けてから取り出そう');
+      src = { pid: b.p, n: () => b.n, take: () => { b.n--; } };
+    } else {
+      const f = this.fx(a.fid), sl = f?.s?.[a.si | 0];
+      if (!sl || !sl[0] || sl[1] <= 0) return;
+      src = { pid: sl[0], n: () => sl[1], take: () => { sl[1]--; } };
+    }
+    const hd = this.hand(uid), pid = src.pid;
+    if (isPack(pid)) {
+      if (hd && hd.t !== 'packs') return this.err(uid, '手がふさがっています');
+      const cur = hd ? hd.a : [];
+      if (cur.length >= HAND_MAX) return this.err(uid, `パックは${HAND_MAX}パックまで持てます`);
+      const want = a.all ? HAND_MAX - cur.length : 1;
+      for (let i = 0; i < want && src.n() > 0; i++) { src.take(); cur.push(pid); }
+      this.setHand(uid, { t: 'packs', a: cur });
+    } else if (isBoosterBox(pid)) {
+      if (hd) return this.err(uid, hd.t === 'box' ? 'BOXは1つしか持てません' : '手がふさがっています');
+      src.take(); this.setHand(uid, { t: 'box', p: pid });
+    } else if (isSpray(pid)) {
+      if (hd) return this.err(uid, '手がふさがっています');
+      src.take(); this.setHand(uid, { t: 'spray', p: pid, u: 1 });
+    } else return this.err(uid, '手に持てるのはパック・BOX・消臭スプレーです');
+    this.sfx('pick'); this.bump();
+  }
+  // 手に持っている物を棚の枠に置く（パックは同じ種類を1つずつ／all で全部）
+  a_handPut(uid, a) {
+    const hd = this.hand(uid), f = this.fx(a.fid);
+    if (!hd || !f?.s) return;
+    const si = a.si | 0, slot = FIXTURES[f.t].slots[si], sl = f.s[si];
+    if (!slot || !sl) return;
+    const pid = a.pid && hd.t === 'packs' && hd.a.includes(a.pid) ? a.pid : handPid(hd);
+    if (hd.t === 'spray' && hd.u < 0.999) return this.err(uid, '使いかけのスプレーは棚に戻せません');
+    if (!canPlace(pid, slot)) return this.err(uid, `${PRODUCTS[pid].name}はこの棚に置けません`);
+    if (sl[0] && sl[0] !== pid && sl[1] > 0) return this.err(uid, '別の商品が並んでいます');
+    const cap = slotCapacity(pid, slot);
+    if (sl[0] === pid && sl[1] >= cap) return this.err(uid, '棚がいっぱいです');
+    sl[0] = pid;
+    if (hd.t === 'packs') {
+      let n = 0; const want = a.all ? 99 : 1;
+      for (let i = hd.a.length - 1; i >= 0 && n < want && sl[1] < cap; i--) if (hd.a[i] === pid) { hd.a.splice(i, 1); sl[1]++; n++; }
+      if (!hd.a.length) this.setHand(uid, null);
+    } else { sl[1]++; this.setHand(uid, null); }
+    this.sfx('stock', f.x, f.z); this.bump();
+  }
+  // 手に持っている物を、開いている段ボールに戻す
+  a_handBox(uid, a) {
+    const hd = this.hand(uid), b = this.box(a.bid);
+    if (!hd || !b || b.loc.t === 'h') return;
+    if (!b.o) return this.err(uid, '段ボールを開けてから入れよう');
+    const pid = handPid(hd);
+    if (hd.t === 'spray' && hd.u < 0.999) return this.err(uid, '使いかけのスプレーは戻せません');
+    if (b.n > 0 && b.p !== pid) return this.err(uid, 'この段ボールには別の商品が入っています');
+    const cap = PRODUCTS[pid].qty;
+    if (b.n >= cap) return this.err(uid, '段ボールがいっぱいです');
+    b.p = pid;
+    if (hd.t === 'packs') { for (let i = hd.a.length - 1; i >= 0 && b.n < cap; i--) if (hd.a[i] === pid) { hd.a.splice(i, 1); b.n++; } if (!hd.a.length) this.setHand(uid, null); }
+    else { b.n++; this.setHand(uid, null); }
+    this.sfx('stock'); this.bump();
+  }
+  // 手に持っているパックを開封（1パック／all で全部）
+  a_handOpen(uid, a = {}) {
+    const hd = this.hand(uid);
+    if (!hd || hd.t !== 'packs') return;
+    const take = a.all ? hd.a.splice(0) : [hd.a.pop()];
+    if (!hd.a.length) this.setHand(uid, null);
+    const packs = take.map((pid) => openPack(seriesOfProduct(pid)));
+    this.gainCards(uid, packs, take.length > 1 ? 'box' : 'pack', seriesOfProduct(take[0]), { hand: 1 });
     this.sfx('tear'); this.bump();
   }
-  gainCards(uid, packs, kind, sid) {
+  // 手に持っているBOXを開ける → 10パックが手に出てくる（そのまま開封・途中でやめる・棚に並べる）
+  a_handBoxOpen(uid) {
+    const hd = this.hand(uid);
+    if (!hd || hd.t !== 'box') return;
+    const sid = seriesOfProduct(hd.p);
+    this.setHand(uid, { t: 'packs', a: Array(BOX_PACKS).fill('pk' + sid) });
+    this.store.stats.boxes++;
+    this.ev({ t: 'boxopened', to: uid, s: sid, n: BOX_PACKS });
+    this.sfx('boxopen'); this.bump();
+  }
+  // 消臭スプレー：前に向かってシュッ（近くの臭いお客さんの臭いが減る）
+  a_spray(uid, a) {
+    const hd = this.hand(uid);
+    if (!hd || hd.t !== 'spray') return;
+    const x = +a.x, z = +a.z;
+    if (!isFinite(x) || !isFinite(z)) return;
+    const p = this.players[uid];
+    hd.u = Math.max(0, hd.u - 1 / SPRAY_USES_HAND);
+    for (const c of this.dyn.customers) if (c.sm > 0 && c.st !== 'out' && dist(c.x, c.z, x, z) < 1.4) this.deodorize(c, 5);
+    this.ev({ t: 'spray', x: p?.x ?? x, z: p?.z ?? z, tx: x, tz: z, y: 1.25, who: uid });
+    if (hd.u <= 0.001) { this.setHand(uid, null); this.toast(uid, '🧴 消臭スプレーが空になりました', 'info'); }
+    this.bump();
+  }
+  deodorize(c, pot) {
+    if (!(c.sm > 0)) return;
+    c.sm = Math.max(0, c.sm - pot);
+    this.store.stats.sprayed = (this.store.stats.sprayed || 0) + 1;
+    if (c.sm <= 0.001) { c.sm = 0; c.cleaned = 1; this.store.today.cleaned = (this.store.today.cleaned || 0) + 1; this.bubble(c, 'fresh'); }
+    this.dynRev++;
+  }
+  // 手に持っている消臭スプレーを捨てる（ゴミ箱で）
+  a_handTrash(uid) {
+    const hd = this.hand(uid);
+    if (!hd || hd.t !== 'spray') return;
+    this.setHand(uid, null); this.sfx('trash'); this.bump();
+  }
+  // オートセント（自動消臭機）に消臭スプレーをセットする（手に持ったスプレー、または開いた段ボールから1本）
+  a_scentLoad(uid, a) {
+    const f = this.fx(a.fid), def = f && FIXTURES[f.t];
+    if (!def?.scent) return;
+    f.sp ||= [];
+    if (f.sp.length >= def.scent.cans) return this.err(uid, `スプレーは${def.scent.cans}本までセットできます`);
+    const hd = this.hand(uid), b = this.heldBox(uid);
+    if (hd?.t === 'spray') { f.sp.push(+hd.u.toFixed(3)); this.setHand(uid, null); }
+    else if (b && isSpray(b.p) && b.n > 0) { if (!b.o) return this.err(uid, '段ボールを開けてからセットしよう'); b.n--; f.sp.push(1); }
+    else return this.err(uid, '消臭スプレーを持ってきてセットしよう');
+    this.sfx('place', f.x, f.z); this.bump();
+  }
+  gainCards(uid, packs, kind, sid, extra = {}) {
     const st = this.store, nw = [];
     for (const p of packs) for (const cid of p) {
       const b = baseId(cid); // 図鑑はフラッシュかどうかに関係なく、カードの種類で登録
@@ -573,10 +772,9 @@ export class Sim {
       st.cards[cid] = (st.cards[cid] || 0) + 1; st.dex[b] = 1;
     }
     st.stats.packs += packs.length; st.today.packs = (st.today.packs || 0) + packs.length;
-    if (kind === 'box') st.stats.boxes++;
     let best = null;
     for (const p of packs) for (const cid of p) if (!best || cardRank(cid) > cardRank(best)) best = cid;
-    this.ev({ t: 'pack', to: uid, kind, s: sid, packs, nw, best, who: this.players[uid]?.name || '' });
+    this.ev({ t: 'pack', to: uid, kind, s: sid, packs, nw, best, who: this.players[uid]?.name || '', ...extra });
   }
   a_cardPut(uid, a) {
     const st = this.store, f = this.fx(a.fid), def = f && FIXTURES[f.t];
@@ -693,6 +891,8 @@ export class Sim {
       for (const d of ready) this.deliver(d.items);
     }
     for (const c of dyn.customers) this.updateCustomer(c, dt);
+    this.updateSmell(dt);
+    this.updateScents(dt);
     dyn.customers = dyn.customers.filter((c) => !c.gone);
     for (const s of st.staff) this.updateStaff(s, dt);
     for (const fid in dyn.regs) this.updateReg(+fid, dyn.regs[fid], dt);
@@ -708,6 +908,42 @@ export class Sim {
     this.toast(null, '📦 店の前に段ボールが届きました！倉庫に運ぶか、そのまま補充しよう', 'ok');
     this.dyn.dropT = 6;
     this.sfx('drop'); this.bump();
+  }
+
+  // ---------- 臭いお客さん ----------
+  // 臭いお客さんの近く（2.6m）にいるお客さんはイライラして、長くいると帰ってしまう
+  updateSmell(dt) {
+    const dyn = this.dyn;
+    if ((dyn.smT = (dyn.smT || 0) - dt) > 0) return;
+    const step = 0.5; dyn.smT = step;
+    const smelly = dyn.customers.filter((c) => c.sm > 0 && c.st !== 'out' && inStore(c));
+    for (const o of dyn.customers) {
+      if (o.sm > 0 || o.st === 'out' || o.gone) continue;
+      const near = smelly.length && inStore(o) && smelly.some((c) => dist2(c.x, c.z, o.x, o.z) < 2.6 * 2.6);
+      if (near) {
+        o.stk = (o.stk || 0) + step; o.smelt = 1;
+        if (o.stk >= 1.5 && (!o.bub || o.bub === 'wait' || o.bub === 'look')) this.bubble(o, 'stink');
+        o.pat -= step * 1.5;
+        if (o.stk >= 10 && o.st !== 'pay') { o.why = 'smell'; this.store.today.smellLost = (this.store.today.smellLost || 0) + 1; this.leave(o, true); }
+      } else if (o.stk > 0) o.stk = Math.max(0, o.stk - step * 0.5);
+    }
+  }
+  // オートセント：範囲に臭いお客さんが入ると、セットした消臭スプレーで自動でシュッ（間隔をあけて）
+  updateScents(dt) {
+    const dyn = this.dyn; dyn.scd ||= {};
+    for (const f of this.store.fixtures) {
+      const sc = FIXTURES[f.t]?.scent; if (!sc) continue;
+      if ((dyn.scd[f.id] = (dyn.scd[f.id] || 0) - dt) > 0) continue;
+      if (!f.sp?.length) continue;
+      let tgt = null, bd = sc.range;
+      for (const c of dyn.customers) { if (!(c.sm > 0) || c.st === 'out') continue; const d = dist(c.x, c.z, f.x, f.z); if (d < bd) { bd = d; tgt = c; } }
+      if (!tgt) continue;
+      this.deodorize(tgt, sc.pot);
+      f.sp[0] = +(f.sp[0] - sc.use).toFixed(3); if (f.sp[0] <= 0.001) f.sp.shift();
+      dyn.scd[f.id] = sc.cd;
+      this.ev({ t: 'spray', x: f.x, z: f.z, tx: tgt.x, tz: tgt.z, y: 1.0, fid: f.id });
+      this.bump();
+    }
   }
 
   // ---------- お客さん ----------
@@ -729,13 +965,13 @@ export class Sim {
     const [sx, sz] = pick(SPAWN_POINTS);
     const stocked = new Map();
     for (const f of st.fixtures) if (f.s) f.s.forEach((s) => { if (s[0]) stocked.set(s[0], (stocked.get(s[0]) || 0) + 1); });
-    const unlocked = PRODUCTS_LIST.filter((p) => productUnlocked(p.id, st.level)).map((p) => p.id);
+    const unlocked = PRODUCTS_LIST.filter((p) => canOrder(st, p.id)).map((p) => p.id);
     const hasCards = st.fixtures.some((f) => f.cs && f.cs.some(Boolean));
     const hasPlay = st.fixtures.some((f) => FIXTURES[f.t].seats);
     const r = Math.random();
     const kind = hasCards && r < 0.3 ? 'collector' : hasPlay && r < 0.5 ? 'gamer' : 'shopper';
     // 欲しい商品（パックが一番人気）
-    const W = { pack: 3, box: 0.8, supply: 1.2 };
+    const W = { pack: 3, box: 0.9, supply: 1.1, goods: 1.0, other: 0.6 };
     const want = () => {
       const pool = stocked.size && Math.random() < 0.85 ? [...stocked.keys()] : unlocked;
       let tot = 0; for (const p of pool) tot += W[PRODUCTS[p].cat] || 1;
@@ -757,7 +993,10 @@ export class Sim {
       // 予算：ふつうは数百〜数千円。ときどき高いレアカードを探しに来るコレクター（予算8倍）も来る
       budget: kind === 'collector' ? Math.round(Math.exp(rand(Math.log(200), Math.log(4000 + st.level * 2000))) * (Math.random() < 0.12 ? 8 : 1)) : 0,
       wantPlay: kind === 'gamer',
+      // 臭いお客さん（臭い10。消臭スプレー2回、オートセント G500 以上なら1回で消える）
+      sm: Math.random() < smellRate(st.level) ? 10 : 0,
     };
+    if (c.sm) st.today.smelly = (st.today.smelly || 0) + 1;
     this.dyn.customers.push(c);
     for (const f of st.fixtures) if (f.t === 'vending' && Math.random() < 0.18) { st.money += 160; st.today.vend += 160; }
     this.nextShop(c);
@@ -783,6 +1022,8 @@ export class Sim {
       if (c.cheap.length) { s += 0.4; why.push(['cheap', c.cheap[0]]); }
       if (c.gotCard) { s += 0.4; why.push(['card', c.gotCard]); }
       if (c.played) { s += 0.3; why.push('play'); }
+      if (c.smelt && !c.sm) { s -= 0.8; why.push('smell'); }
+      if (c.cleaned) { s += 0.3; why.push('fresh'); }
       const kinds = new Set(); for (const f of st.fixtures) if (f.s) for (const x of f.s) if (x[0] && x[1] > 0) kinds.add(x[0]);
       if (kinds.size >= 12) { s += 0.3; why.push('variety'); } else if (kinds.size <= 2) { s -= 0.3; why.push('few'); }
       const mess = st.boxes.filter((b) => b.loc.t === 'f' && b.n === 0 && st.bays[bayAt(b.loc.x, b.loc.z)]).length;
@@ -1117,12 +1358,30 @@ export class Sim {
       rt = dyn.staffRt[s.id] = { x, z, ry: 0, st: 'idle', t: rand(0.5, 2), path: null, pi: 0, an: 'idle' };
     }
     const who = 's:' + s.id;
-    // はやさ：とても遅い〜とても早い（得意でない仕事なら遅くなる）
-    const k = rt.k = staffK(s);
+    // いまの仕事（両方おまかせの人は、並んでいるレジに人がいなければレジへ）
+    const job = this.staffJob(s, rt, who);
+    // はやさ：とても遅い〜とても早い（人ごとに、レジと品出しでちがう）
+    const k = rt.k = staffK(s, job);
     const spd = 1.9 * k;
     if (rt.st !== 'idle' && rt.path && rt.pi < (rt.path?.length || 0)) rt.an = 'walk';
-    if (s.role === 'cashier') return this.staffCashier(s, rt, dt, spd, who);
+    if (job === 'cashier') return this.staffCashier(s, rt, dt, spd, who);
     return this.staffStocker(s, rt, dt, spd, who);
+  }
+  staffJob(s, rt, who) {
+    if (s.role === 'cashier' || s.role === 'stocker') return s.role;
+    if (rt.job === 'cashier') return 'cashier';
+    if (this.heldBox(who) || (rt.st && rt.st !== 'idle')) return 'stocker'; // 品出しの途中は最後までやる
+    const st = this.store;
+    const need = st.fixtures.some((f) => f.t === 'checkout' && !this.reg(f.id).op && this.reg(f.id).q.length > 0
+      && !st.staff.some((o) => o !== s && this.dyn.staffRt[o.id]?.st === 'toreg' && this.dyn.staffRt[o.id]?.fid === f.id));
+    if (need) {
+      // 手が空いている「両方」の人のうち、いちばんレジが早い人が行く
+      const free = st.staff.filter((o) => o.role === 'both' && !this.heldBox('s:' + o.id) && (!this.dyn.staffRt[o.id]?.st || this.dyn.staffRt[o.id]?.st === 'idle') && this.dyn.staffRt[o.id]?.job !== 'cashier');
+      const best = free.sort((a, b) => (b.reg - a.reg) || (a.stk - b.stk))[0];
+      if (best && best !== s) return 'stocker';
+      rt.job = 'cashier'; rt.st = 'idle'; rt.t = 0; rt.msg = null; return 'cashier';
+    }
+    return 'stocker';
   }
   nearestTrash(x, z) {
     let best = null, bd = 1e9;
@@ -1135,17 +1394,27 @@ export class Sim {
     return false;
   }
   staffCashier(s, rt, dt, spd, who) {
+    const both = s.role === 'both';
     const mine = Object.entries(this.dyn.regs).find(([, r]) => r.op === who);
-    if (mine) { rt.an = 'idle'; const f = this.fx(+mine[0]); if (f) rt.ry = Math.atan2(...localDir(f, 1, 0)); return; }
+    if (mine) {
+      rt.an = 'idle'; const f = this.fx(+mine[0]); if (f) rt.ry = Math.atan2(...localDir(f, 1, 0));
+      // 両方おまかせの人：お客さんがいなくなってしばらくしたら品出しにもどる
+      const r = mine[1];
+      if (both) {
+        if (r.ph === 'idle' && !r.q.length) rt.regIdle = (rt.regIdle || 0) + dt; else rt.regIdle = 0;
+        if (rt.regIdle > 6) { r.op = null; rt.job = null; rt.regIdle = 0; rt.st = 'idle'; rt.t = 0.3; this.dynRev++; }
+      }
+      return;
+    }
     if (rt.st === 'toreg') {
       const r = this.dyn.regs[rt.fid], f = this.fx(rt.fid);
-      if (!f || !r || (r.op && r.op !== who)) { rt.st = 'idle'; rt.t = 0.5; return; }
-      if (stepPath(rt, dt, spd)) { r.op = who; this.dynRev++; }
+      if (!f || !r || (r.op && r.op !== who)) { rt.st = 'idle'; rt.t = 0.5; if (both) rt.job = null; return; }
+      if (stepPath(rt, dt, spd)) { r.op = who; rt.st = 'idle'; rt.regIdle = 0; this.dynRev++; }
       return;
     }
     if (!this.staffIdle(rt, dt)) return;
     const free = this.store.fixtures.filter((f) => f.t === 'checkout' && !this.reg(f.id).op && !this.store.staff.some((o) => o !== s && this.dyn.staffRt[o.id]?.st === 'toreg' && this.dyn.staffRt[o.id]?.fid === f.id));
-    if (!free.length) { rt.msg = this.store.fixtures.some((f) => f.t === 'checkout') ? null : 'noreg'; return; }
+    if (!free.length) { rt.msg = this.store.fixtures.some((f) => f.t === 'checkout') ? null : 'noreg'; if (both) rt.job = null; return; }
     free.sort((a, b) => this.reg(b.id).q.length - this.reg(a.id).q.length);
     const f = free[0];
     const [x, z] = checkoutSpot(f, -1);
@@ -1352,7 +1621,7 @@ export class Sim {
     st.money -= wages + bills;
     const top = Object.entries(st.today.items || {}).sort((a, b) => b[1][1] - a[1][1]).slice(0, 6);
     const T = st.today;
-    const data = { top, prevProfit: st.last?.profit ?? null, day: st.day, recycle: T.recycle || 0, sales: T.sales, served: T.served, lost: T.lost, orders: T.orders, ship: T.ship || 0, wages, bills, vend: T.vend, xp: T.xp, level: st.level, rep: Math.round(st.rep), repPrev: st.last?.rep ?? null, rv: T.rv || [0, 0, 0, 0, 0], money: st.money, cardSales: T.cardSales || 0, playSales: T.playSales || 0, buyback: T.buyback || 0, packs: T.packs || 0 };
+    const data = { top, prevProfit: st.last?.profit ?? null, day: st.day, recycle: T.recycle || 0, sales: T.sales, served: T.served, lost: T.lost, orders: T.orders, ship: T.ship || 0, wages, bills, vend: T.vend, xp: T.xp, level: st.level, rep: Math.round(st.rep), repPrev: st.last?.rep ?? null, rv: T.rv || [0, 0, 0, 0, 0], money: st.money, cardSales: T.cardSales || 0, playSales: T.playSales || 0, buyback: T.buyback || 0, packs: T.packs || 0, lic: T.lic || 0, smelly: T.smelly || 0, cleaned: T.cleaned || 0, smellLost: T.smellLost || 0 };
     data.profit = data.sales + data.vend + data.recycle + data.buyback - data.orders - data.ship - wages - bills;
     st.phase = 'summary'; st.last = data;
     for (const fid in this.dyn.regs) this.resetReg(+fid, true);
@@ -1370,7 +1639,7 @@ export class Sim {
     for (const fid in d.seats) if (d.seats[fid].some(Boolean)) pt[fid] = d.seats[fid].map((cid) => { const c = cid && d.customers.find((o) => o.id === cid); return c && c.st === 'play' ? 1 : 0; });
     return {
       time: this.store.time,
-      c: d.customers.map((c) => [c.id, c.av, +c.x.toFixed(2), +c.z.toFixed(2), +c.ry.toFixed(2), c.an, c.bub || '', c.basket.length, c.basket.slice(0, 8).map((b) => b.p).join(','), c.hold || '']),
+      c: d.customers.map((c) => [c.id, c.av, +c.x.toFixed(2), +c.z.toFixed(2), +c.ry.toFixed(2), c.an, c.bub || '', c.basket.length, c.basket.slice(0, 8).map((b) => b.p).join(','), c.hold || '', c.sm > 0 ? Math.ceil(c.sm) : 0]),
       s: this.store.staff.map((s) => { const r = d.staffRt[s.id] || {}; return [s.id, +(r.x || 0).toFixed(2), +(r.z || 0).toFixed(2), +(r.ry || 0).toFixed(2), r.an || 'idle', r.st === 'idle' || !r.st ? r.msg || '' : '']; }),
       r: regs, pt,
       dl: d.deliveries.length,
@@ -1402,9 +1671,9 @@ export function cashGiven(total) {
   if (g < total) g = up(1000);
   return g;
 }
-const BOARD_TYPES = ['mboard', 'fboard', 'xboard'];
+const BOARD_TYPES = ['pc', 'fboard', 'xboard'];
 const staffName = (v) => String(v ?? '').replace(/[\r\n\t]/g, ' ').trim().slice(0, 10);
-const BOARD_ONLY = '📋 パソコン室（入口の右）のボードの前で操作してください';
+const BOARD_ONLY = '💻 パソコン室（入口の右）のパソコンの前で操作してください';
 // 来店の勢い：レベル・売り場の広さ・評判・お客さんを呼ぶ設備
 export function customerFactors(st) {
   const bays = Math.max(1, Object.keys(st.bays || {}).length);
@@ -1431,14 +1700,16 @@ const RV = {
   mess: () => pick(['通路に段ボールが置きっぱなし', 'お店が散らかってた']),
   waitAngry: () => pick(['待たされすぎ！もう来ない', 'レジが遅すぎて帰った']),
   noreg: () => 'レジがなくて買えなかった',
+  smell: () => pick(['臭いお客さんがいて落ち着かなかった', 'お店がなんだか臭い…', '臭いがきつくて帰った', '消臭してほしい…']),
+  fresh: () => pick(['消臭スプレーをかけてもらってスッキリ！', 'いい香りのお店！', '店員さんが消臭してくれた']),
   angry: () => 'もう来ない！',
   5: () => pick(['また来ます！', '最高のカードショップ！', '近所にあってうれしい']), 4: () => pick(['いいお店でした', '感じのいいお店']),
   3: () => pick(['ふつうかな', 'まあまあ']), 2: () => pick(['うーん…', 'ちょっと残念']), 1: () => 'もう来ない',
 };
 const itemName = (k) => (String(k).startsWith('c:') ? CARDS[k.slice(2)]?.name : k === '_play' ? 'プレイ料金' : PRODUCTS[k]?.name) || '';
 function reviewText(stars, why) {
-  const bad = why.filter((w) => ['miss', 'pricey', 'waitL', 'wait', 'few', 'mess', 'waitAngry', 'noreg', 'angry'].includes(Array.isArray(w) ? w[0] : w));
-  const good = why.filter((w) => ['cheap', 'fast', 'variety', 'card', 'play'].includes(Array.isArray(w) ? w[0] : w));
+  const bad = why.filter((w) => ['smell', 'miss', 'pricey', 'waitL', 'wait', 'few', 'mess', 'waitAngry', 'noreg', 'angry'].includes(Array.isArray(w) ? w[0] : w));
+  const good = why.filter((w) => ['cheap', 'fast', 'variety', 'card', 'play', 'fresh'].includes(Array.isArray(w) ? w[0] : w));
   const w = stars <= 3 ? bad[0] || null : (Math.random() < 0.6 && good.length ? pick(good) : null);
   if (!w) return RV[stars]();
   const [k, p] = Array.isArray(w) ? w : [w];

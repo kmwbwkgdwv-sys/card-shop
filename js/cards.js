@@ -25,7 +25,7 @@ export const cardRank = (cid) => rarityOrder(CARDS[cid]?.r) * 2 + (isFlash(cid) 
 
 // 1パック5枚。封入率は「1枚ごとの独立判定」（%）
 export const PACK_SIZE = 5;
-export const BOX_PACKS = 30;
+export const BOX_PACKS = 10; // 1BOX＝10パック
 export const CARD_RATES = [['N', 69.8], ['R', 17.35], ['SR', 7.6], ['SSR', 4.0], ['HR', 1.0], ['UR', 0.25]];
 
 const _bySR = new Map();

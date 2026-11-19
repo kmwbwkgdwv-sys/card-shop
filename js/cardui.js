@@ -109,7 +109,7 @@ export function cardDetail(store, cid, { actions = [] } = {}) {
 
 // ---------- 開封の演出 ----------
 // e：{ kind:'pack'|'box', s, packs:[[cid×5]...], nw:[新しく図鑑に入ったカード] }
-export function packOpening(e, { sfx, onClose, onMore, moreLabel } = {}) {
+export function packOpening(e, { sfx, onClose, onMore, moreLabel, onAll, allLabel } = {}) {
   const se = SERIES_BY[e.s];
   const ov = h('div', { class: 'pack-ov' });
   const stage = h('div', { class: 'po-stage' });
@@ -145,6 +145,7 @@ export function packOpening(e, { sfx, onClose, onMore, moreLabel } = {}) {
     hint.textContent = `${e.nw.length ? `🆕 図鑑に${e.nw.length}種類登録！　` : ''}いちばんレア：${rname(best)}　（カードはさわると傾きます）`;
     const btns = h('div', { class: 'po-btns' });
     if (onMore) btns.append(h('button', { class: 'btn big', onclick: () => { ov.remove(); onMore(); } }, moreLabel || 'もう1パック開ける'));
+    if (onAll) btns.append(h('button', { class: 'btn big alt', onclick: () => { ov.remove(); onAll(); } }, allLabel || 'まとめて開ける'));
     btns.append(h('button', { class: 'btn big ghost', onclick: close }, '閉じる'));
     ov.append(btns);
   };

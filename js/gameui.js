@@ -1,7 +1,7 @@
 // ===== ゲーム中のUI（HUD・発注PC・スキルボード・レジ・建築・チャット） =====
-import { h, $, modal, toast, confirmBox, promptBox } from './ui.js';
-import { PRODUCTS, PRODUCTS_LIST, CATEGORIES, FIXTURES, FIXTURE_CATS, STAFF_ROLES, STAFF_NAMES, SPEEDS, OFF_ROLE, staffK,
-  productUnlocked, fixtureUnlocked, staffLimit, STAFF_SLOTS, STAFF_MAX, staffWage, xpNeed, closeTime, CHAT_PRESETS, SALES, STOCK_COLS, STOCK_ROWS, stockAt, expandTargets, marketPrice, marketCost, ORDER_MAX_BOXES, SHIPPING_FEE, MAX_LEVEL, halfQty, EMPTY_BOX, EMPTY_BOX_PRICE, boxProd,
+import { h, $, modal, toast, confirmBox, promptBox, choiceBox } from './ui.js';
+import { PRODUCTS, PRODUCTS_LIST, CATEGORIES, FIXTURES, FIXTURE_CATS, STAFF_ROLES, STAFF_NAMES, SPEEDS,
+  productUnlocked, hasLicense, canOrder, hasStaffLicense, fixtureUnlocked, staffLimit, STAFF_SLOTS, STAFF_MAX, staffWage, xpNeed, closeTime, CHAT_PRESETS, SALES, STOCK_COLS, STOCK_ROWS, stockAt, expandTargets, marketPrice, marketCost, ORDER_MAX_BOXES, SHIPPING_FEE, MAX_LEVEL, halfQty, EMPTY_BOX, EMPTY_BOX_PRICE, boxProd,
   unlocksAt, checkoutLimit, PLAY_FEE_MAX, isPack, isBoosterBox } from './data.js';
 import { CARDS, CARDS_LIST, SERIES, SERIES_BY, RARITY, RARITIES, CARD_RATES, FLASH_RATE, FLASH_MULT, PACK_SIZE, BOX_PACKS, cardValue, cardValuePrev, cardPrice, cardLimit, buybackPrice, BUYBACK, rarityOrder, collectionStats, displayedCount, seriesOfProduct } from './cards.js';
 import { packCanvas, boxCanvas } from './cardart.js';
@@ -19,7 +19,7 @@ export class GameUI {
     this.day = h('div', { class: 'hud-chip' }); this.openBtn = h('button', { class: 'hud-open' });
     this.money = h('div', { class: 'hud-chip money' });
     this.lvText = h('span'); this.lvBar = h('i');
-    this.binder = h('button', { class: 'hud-chip binder', title: 'バインダー（C）' }, '📒');
+    this.binder = h('button', { class: 'hud-chip binder', title: 'コレクションファイル（C）' }, '📒');
     this.rep = h('button', { class: 'hud-chip rep', title: '評判と口コミを見る（Tab）' });
     this.lv = h('button', { class: 'hud-chip lv', title: 'レベルとできるようになること' }, this.lvText, h('div', { class: 'bar' }, this.lvBar));
     H.append(h('div', { class: 'hud-top' }, this.day, this.openBtn, this.money, this.lv, this.rep, this.binder));
@@ -75,26 +75,37 @@ export class GameUI {
   openPC(tab = 'order') {
     const g = this.g;
     const cart = new Map();
-    let cat = 'pack';
+    let cat = 'pack', lcat = 'pack';
     const body = h('div', { class: 'pc-body' });
-    const tabs = h('div', { class: 'tabs' });
-    const TABS = [['order', '📦 発注'], ['staff', '🧑‍💼 従業員'], ['rep', '💬 評判'], ['store', '🏪 お店']];
+    const tabs = h('div', { class: 'tabs pc-apps' });
+    const TABS = [['order', '🛒', '仕入れ'], ['license', '🔑', 'ライセンス'], ['staff', '🧑‍💼', '従業員'], ['rep', '💬', '評判'], ['store', '🏪', 'お店']];
     if (tab === 'price') tab = 'order';
     const total = h('b'); const orderBtn = h('button', { class: 'btn' }, '注文する');
+    const buyLicense = async (p, redraw) => {
+      if (p.lic > g.store.money) { toast('お金が足りません', 'warn'); return; }
+      if (await confirmBox(`🔑「${p.name}」のライセンスを ${yen(p.lic)} で買いますか？\n買うと仕入れられるようになります`, '買う')) { g.act({ t: 'license', pid: p.id }); setTimeout(redraw, 150); }
+    };
+    const buyStaffLic = async (sl, redraw) => {
+      if (sl.lic > g.store.money) { toast('お金が足りません', 'warn'); return; }
+      if (await confirmBox(`🔑 従業員 No.${sl.no} の雇用ライセンスを ${yen(sl.lic)} で買いますか？\n買うとこの人を雇えるようになります（日給 ${yen(staffWage(sl.reg, sl.stk))}）`, '買う')) { g.act({ t: 'staffLicense', slot: sl.no }); setTimeout(redraw, 150); }
+    };
     const draw = () => {
       const st = g.store;
       tabs.innerHTML = '';
-      for (const [k, n] of TABS) tabs.append(h('button', { class: 'tab' + (k === tab ? ' on' : ''), onclick: () => { tab = k; draw(); } }, n));
+      const canSLic = STAFF_SLOTS.filter((sl) => st.level >= sl.lv && !hasStaffLicense(st, sl.no)).length;
+      const canLic = PRODUCTS_LIST.filter((p) => productUnlocked(p.id, st.level) && !hasLicense(st, p.id)).length + canSLic;
+      for (const [k, ic, n] of TABS) tabs.append(h('button', { class: 'tab app' + (k === tab ? ' on' : ''), onclick: () => { tab = k; draw(); } }, h('span', { class: 'ai' }, ic), h('span', { class: 'an' }, n), k === 'license' && canLic ? h('i', { class: 'badge' }, canLic) : k === 'staff' && canSLic ? h('i', { class: 'badge' }, canSLic) : null));
       // ＋−を押して描き直してもスクロール位置がもどらないように覚えておく
-      const same = body.dataset.k === tab + '|' + cat, keepB = body.scrollTop, keepG = body.querySelector('.pgrid')?.scrollTop || 0;
-      body.dataset.k = tab + '|' + cat;
+      const key = tab + '|' + (tab === 'license' ? lcat : cat);
+      const same = body.dataset.k === key, keepB = body.scrollTop, keepG = body.querySelector('.pgrid')?.scrollTop || 0;
+      body.dataset.k = key;
       body.innerHTML = ''; body.className = 'pc-body tab-' + tab;
       requestAnimationFrame(() => { if (same) { body.scrollTop = keepB; const gr = body.querySelector('.pgrid'); if (gr) gr.scrollTop = keepG; } else body.scrollTop = 0; });
       if (tab === 'order') {
         const ctabs = h('div', { class: 'tabs scroll small' });
         for (const [k, c] of Object.entries(CATEGORIES)) ctabs.append(h('button', { class: 'tab' + (k === cat ? ' on' : ''), onclick: () => { cat = k; draw(); } }, c.icon + ' ' + c.name));
         ctabs.append(h('button', { class: 'tab' + (cat === EMPTY_BOX.id ? ' on' : ''), onclick: () => { cat = EMPTY_BOX.id; draw(); } }, '📦 空き箱'));
-        const grid = h('div', { class: 'pgrid' });
+        const grid = h('div', { class: 'pgrid plist2' });
         const inCart = [...cart.values()].reduce((t, n) => t + n, 0), full = inCart >= ORDER_MAX_BOXES;
         const qtyRow = (key, label, price) => {
           const n = cart.get(key) || 0;
@@ -104,38 +115,40 @@ export class GameUI {
         };
         const sm = stockMap(st, g.sim?.dyn);
         if (cat === EMPTY_BOX.id) {
-          // 空の段ボール：棚の商品を詰めて運ぶ（模様替え・棚の入れ替え用）
           const have = st.boxes.filter((b) => b.n <= 0).length;
-          grid.append(h('div', { class: 'pcard2 emptybox' },
+          grid.append(h('div', { class: 'prow2' },
             h('div', { class: 'pe' }, '📦'),
-            h('div', { class: 'pn' }, EMPTY_BOX.name),
-            h('div', { class: 'pm' }, 'どの商品でも1種類だけ詰められる箱。棚の商品を詰めて別の棚へ運べば模様替えが楽に'),
-            h('div', { class: 'pm' }, `補充で空になった箱も同じように使えます（いま空き箱 ${have}個）`),
+            h('div', { class: 'pinfo2' }, h('div', { class: 'pn' }, EMPTY_BOX.name),
+              h('div', { class: 'pm' }, 'どの商品でも1種類だけ詰められる箱。棚の商品を詰めて別の棚へ運べば模様替えが楽に'),
+              h('div', { class: 'pm' }, `補充で空になった箱も同じように使えます（いま空き箱 ${have}個）`)),
             h('div', { class: 'qtys' }, qtyRow(EMPTY_BOX.id, '1箱', EMPTY_BOX_PRICE))));
         }
-        for (const p of PRODUCTS_LIST.filter((x) => x.cat === cat)) {
-          const ok = productUnlocked(p.id, st.level);
+        // 仕入れられる商品 → ライセンスが買える商品 → まだの商品 の順
+        const list = PRODUCTS_LIST.filter((x) => x.cat === cat).map((p) => ({ p, ok: canOrder(st, p.id), lv: productUnlocked(p.id, st.level) }))
+          .sort((x, y) => (y.ok - x.ok) || (y.lv - x.lv) || (x.p.lv - y.p.lv));
+        for (const { p, ok, lv } of list) {
           const unitCost = marketCost(st, p.id);
           const boxCost = Math.round(unitCost * p.qty), halfCost = Math.round(unitCost * halfQty(p.id));
-          const card = h('div', { class: 'pcard2' + (ok ? '' : ' locked') + (p.series ? ' pk' : '') },
+          const unit = p.cat === 'pack' ? 'パック' : p.cat === 'box' ? 'BOX' : '個';
+          const right = ok ? h('div', { class: 'qtys' }, qtyRow(p.id, '1箱', boxCost), qtyRow(p.id + '|h', '半分', halfCost))
+            : lv ? h('button', { class: 'btn small lic-btn', onclick: () => buyLicense(p, draw) }, h('span', {}, '🔑 ライセンス'), h('b', {}, yen(p.lic)))
+              : h('div', { class: 'lock' }, `🔒 お店 Lv.${p.lv}`, h('small', {}, `ライセンス ${yen(p.lic)}`));
+          grid.append(h('div', { class: 'prow2' + (ok ? '' : lv ? ' nolic' : ' locked') + (p.series ? ' pk' : '') },
             prodThumb(p),
-            h('div', { class: 'pn' }, p.name),
-            p.series ? h('div', { class: 'pbadge' }, `第${p.series}弾 ${SERIES_BY[p.series].theme}`) : null,
-            h('div', { class: 'pm' }, `📦 1箱${p.qty}${p.cat === 'pack' ? 'パック' : '個'}（半分は${halfQty(p.id)}）`),
-            h('div', { class: 'pm' }, `仕入 ${yen(marketCost(st, p.id))} / 相場 ${yen(marketPrice(st, p.id))} `, trend(st, p.id)),
-            ok ? stockLine(sm, p.id) : null,
-            ok ? h('div', { class: 'qtys' }, qtyRow(p.id, '1箱', boxCost), qtyRow(p.id + '|h', '半分', halfCost))
-              : h('div', { class: 'lock' }, `🔒 お店 Lv.${p.lv} で入荷`));
-          grid.append(card);
+            h('div', { class: 'pinfo2' },
+              h('div', { class: 'pn' }, p.name),
+              p.series ? h('div', { class: 'pbadge' }, `第${p.series}弾 ${SERIES_BY[p.series].theme}${p.cat === 'box' ? '・1BOX＝10パック' : '・1パック5枚'}`) : null,
+              h('div', { class: 'pm' }, `📦 1箱 ${p.qty}${unit}（半分は${halfQty(p.id)}）・仕入 ${yen(unitCost)}／${unit}`),
+              h('div', { class: 'pm' }, `相場 ${yen(marketPrice(st, p.id))} `, trend(st, p.id), p.cat === 'box' ? h('span', { class: 'good' }, `（10パック分 ${yen(marketPrice(st, 'pk' + p.series) * 10)} より高い）`) : null),
+              ok ? stockLine(sm, p.id) : h('div', { class: 'pm' }, lv ? '🔑 ライセンスを買うと仕入れられます' : `🔒 お店 Lv.${p.lv} でライセンスが買えるようになります`)),
+            right));
         }
-        // カートのキー：商品ID（1箱）／商品ID|h（半分の箱）→ 注文は [商品, 箱数, ハーフ]
         const items = [...cart.entries()].filter(([, n]) => n > 0).map(([k, n]) => [k.split('|')[0], n, k.endsWith('|h') ? 1 : 0]);
         const goods = orderCost(st, items), cost = orderTotal(st, items);
         total.textContent = yen(cost);
         orderBtn.disabled = !items.length || cost > st.money;
         orderBtn.textContent = items.length ? `🚚 注文する（${inCart}箱）` : '注文する';
         orderBtn.onclick = () => { g.act({ t: 'order', items }); cart.clear(); draw(); };
-        // カートの中身（タップで1箱へらす）
         const chips = h('div', { class: 'cart-chips' }, items.length ? items.map(([pid, k, half]) => h('button', { class: 'cchip', onclick: () => { const key = pid + (half ? '|h' : ''); cart.set(key, k - 1); draw(); } }, `${boxProd(pid).icon}${pid === EMPTY_BOX.id ? '空' : ''}${half ? '½' : ''}×${k}`)) : h('span', { class: 'muted small' }, '＋でカートに入れてね'));
         body.append(ctabs, grid, h('div', { class: 'cartbar' },
           h('div', { class: 'cart-l' },
@@ -145,51 +158,91 @@ export class GameUI {
             h('div', { class: 'cart-sum' }, items.length ? `商品 ${yen(goods)} ＋ 送料 ${yen(SHIPPING_FEE)}` : `送料 ${yen(SHIPPING_FEE)}／回（最大${ORDER_MAX_BOXES}箱）`),
             h('div', {}, '合計', h('span', { class: 'muted small' }, '（送料込み）'), total, h('span', { class: 'muted small' }, ` ／ 所持金 ${yen(st.money)}`)),
             orderBtn)));
+      } else if (tab === 'license') {
+        // ライセンス：お店のレベルが届くと買えるようになる。買った商品だけ仕入れられる（原作どおり）
+        const ctabs = h('div', { class: 'tabs scroll small' });
+        for (const [k, c] of Object.entries(CATEGORIES)) {
+          const n = PRODUCTS_LIST.filter((p) => p.cat === k && productUnlocked(p.id, st.level) && !hasLicense(st, p.id)).length;
+          ctabs.append(h('button', { class: 'tab' + (k === lcat ? ' on' : ''), onclick: () => { lcat = k; draw(); } }, c.icon + ' ' + c.name, n ? h('i', { class: 'badge' }, n) : null));
+        }
+        ctabs.append(h('button', { class: 'tab' + (lcat === 'staff' ? ' on' : ''), onclick: () => { lcat = 'staff'; draw(); } }, '🧑‍💼 従業員', canSLic ? h('i', { class: 'badge' }, canSLic) : null));
+        const grid = h('div', { class: 'pgrid plist2' });
+        if (lcat === 'staff') for (const sl of STAFF_SLOTS) {
+          const have = hasStaffLicense(st, sl.no), lv = st.level >= sl.lv, hired = st.staff.some((o) => o.slot === sl.no);
+          grid.append(h('div', { class: 'prow2 lic' + (have ? ' have' : lv ? ' nolic' : ' locked') },
+            h('div', { class: 'pe tile', style: { '--pc': sl.reg > sl.stk ? '#7aa7ff' : sl.stk > sl.reg ? '#ffb36b' : '#9ee6b8' } }, SPEEDS[Math.max(sl.reg, sl.stk)].icon),
+            h('div', { class: 'pinfo2' }, h('div', { class: 'pn' }, `従業員 No.${sl.no}`),
+              h('div', { class: 'pm' }, `お店 Lv.${sl.lv}〜・🧾レジ ${SPEEDS[sl.reg].name}・📦品出し ${SPEEDS[sl.stk].name}・日給 ${yen(staffWage(sl.reg, sl.stk))}${hired ? '・雇っています' : ''}`)),
+            have ? h('div', { class: 'lic-have' }, '✅ 持っています')
+              : lv ? h('button', { class: 'btn small lic-btn', onclick: () => buyStaffLic(sl, draw) }, h('span', {}, '🔑 買う'), h('b', {}, yen(sl.lic)))
+                : h('div', { class: 'lock' }, `🔒 Lv.${sl.lv}`, h('small', {}, yen(sl.lic)))));
+        }
+        else for (const p of PRODUCTS_LIST.filter((x) => x.cat === lcat).sort((x, y) => x.lv - y.lv)) {
+          const have = hasLicense(st, p.id), lv = productUnlocked(p.id, st.level);
+          grid.append(h('div', { class: 'prow2 lic' + (have ? ' have' : lv ? ' nolic' : ' locked') },
+            prodThumb(p),
+            h('div', { class: 'pinfo2' }, h('div', { class: 'pn' }, p.name),
+              h('div', { class: 'pm' }, `お店 Lv.${p.lv}〜・売値の目安 ${yen(p.price)}・1箱 ${p.qty}${p.cat === 'pack' ? 'パック' : p.cat === 'box' ? 'BOX' : '個'}`)),
+            have ? h('div', { class: 'lic-have' }, '✅ 持っています')
+              : lv ? h('button', { class: 'btn small lic-btn', onclick: () => buyLicense(p, draw) }, h('span', {}, '🔑 買う'), h('b', {}, p.lic ? yen(p.lic) : '無料'))
+                : h('div', { class: 'lock' }, `🔒 Lv.${p.lv}`, h('small', {}, yen(p.lic)))));
+        }
+        body.append(h('p', { class: 'muted small' }, '🔑 お店のレベルが上がると、新しい商品と従業員のライセンスが買えるようになります。ライセンスを買った商品だけ「仕入れ」で注文でき、雇用ライセンスを買った従業員だけ雇えます。'), ctabs, grid);
       } else if (tab === 'rep') {
         body.append(repPanel(st));
       } else if (tab === 'staff') {
-        // 従業員 No.1〜10。お店のレベルが上がると1人ずつ雇える。はやさは5段階、得意な仕事はレジか品出し
+        // 従業員 No.1〜10。だれでもレジと品出しの両方ができるが、人によって得意さ（はやさ）がちがう
         const wages = st.staff.reduce((t, o) => t + (o.wage || 0), 0);
         const tagged = st.fixtures.reduce((n, f) => n + (f.s ? f.s.filter((x) => x[0]).length : 0), 0);
         const labels = st.fixtures.reduce((n, f) => n + (f.lb ? f.lb.filter(Boolean).length : 0), 0);
         body.append(h('div', { class: 'wage-total' }, `💴 人件費 1日 ${yen(wages)}`, h('span', { class: 'muted small' }, `（${st.staff.length}人・閉店のときに払います）`)),
-          h('p', { class: 'muted small' }, `雇える人 ${staffLimit(st.level)} / ${STAFF_MAX}人（お店 Lv.5 から1人ずつ増える）。はやさは「とても遅い〜とても早い」の5段階で、1人ひとりに得意な仕事（🧾レジ／📦品出し）があります。得意でない仕事もできますが、はやさが${Math.round(OFF_ROLE * 100)}%になります。品出し係は値札のついた棚（いま${tagged}か所）に補充し、届いた段ボールはラベルの貼ってある倉庫棚の段（いま${labels}段）にしまいます。`));
-        const bar = (k) => h('span', { class: 'spdbar' }, h('i', { style: { width: Math.round(k / 2 * 100) + '%' } }));
+          h('p', { class: 'muted small' }, `雇える人 ${staffLimit(st.level)} / ${STAFF_MAX}人（お店 Lv.5 から1人ずつ増える。雇うには先に🔑雇用ライセンスが必要）。だれでも🧾レジと📦品出しの両方ができますが、人によってそれぞれのはやさがちがいます（レジが得意で品出しが遅い人、その逆の人、両方同じ人）。「🔄両方」にすると、お客さんがレジに並んだらレジへ、空いている時間は品出しをします。品出しは値札のついた棚（いま${tagged}か所）に補充し、届いた段ボールはラベルの貼ってある倉庫棚の段（いま${labels}段）にしまいます。`));
+        const bar = (spd) => h('span', { class: 'spdbar' }, h('i', { style: { width: Math.round(SPEEDS[spd].k / 2 * 100) + '%' } }));
+        const skills = (reg, stk) => h('div', { class: 'skills' },
+          h('div', { class: 'sk' + (reg > stk ? ' fav' : '') }, h('span', {}, '🧾 レジ'), bar(reg), h('b', {}, `${SPEEDS[reg].icon}${SPEEDS[reg].name}`)),
+          h('div', { class: 'sk' + (stk > reg ? ' fav' : '') }, h('span', {}, '📦 品出し'), bar(stk), h('b', {}, `${SPEEDS[stk].icon}${SPEEDS[stk].name}`)));
+        const favText = (reg, stk) => (reg > stk ? 'レジが得意' : stk > reg ? '品出しが得意' : 'レジも品出しも同じ');
         const r = mulberry32(st.day * 7919 + st.staff.length * 31);
         for (const sl of STAFF_SLOTS) {
           const s = st.staff.find((o) => o.slot === sl.no);
-          const open = st.level >= sl.lv, sp = SPEEDS[sl.spd], fav = STAFF_ROLES[sl.role];
-          const head = h('div', { class: 'slot-h' }, h('b', {}, `${sp.icon} No.${sl.no}「${sp.name}」`), h('span', { class: 'favb ' + sl.role }, `得意：${fav.icon}${fav.name}`), bar(s ? staffK(s) : sp.k));
+          const open = st.level >= sl.lv;
+          const head = h('div', { class: 'slot-h' }, h('b', {}, `No.${sl.no}`), h('span', { class: 'favb ' + (sl.reg > sl.stk ? 'cashier' : sl.stk > sl.reg ? 'stocker' : 'both') }, favText(sl.reg, sl.stk)));
           if (s) {
-            const R = STAFF_ROLES[s.role];
-            body.append(h('div', { class: 'scard' }, head,
-              h('div', { class: 'row between' }, h('span', {}, `${R.icon} ${s.name}さん（${R.name}${s.role === s.fav ? '・得意！' : '・苦手'}）`,
+            const R = STAFF_ROLES[s.role] || STAFF_ROLES.both;
+            body.append(h('div', { class: 'scard' }, head, skills(s.reg, s.stk),
+              h('div', { class: 'row between' }, h('span', {}, `${R.icon} ${s.name}さん（${R.name}）`,
                 h('button', { class: 'btn tiny ghost', title: '名前を変える', onclick: async () => { const v = await promptBox('✏️ 従業員の名前（10文字まで）', s.name, { max: 10, placeholder: '名前' }); if (v) { g.act({ t: 'staffName', sid: s.id, name: v }); setTimeout(draw, 150); } } }, '✏️')),
                 h('span', { class: 'muted small' }, `日給 ${yen(s.wage)}`),
                 h('button', { class: 'btn small ghost', onclick: async () => { if (await confirmBox(`${s.name}さんを解雇しますか？（もう一度雇うこともできます）`, '解雇')) { g.act({ t: 'fire', sid: s.id }); setTimeout(draw, 150); } } }, '解雇')),
-              h('div', { class: 'roles' }, Object.entries(STAFF_ROLES).map(([k, d]) => h('button', { class: 'role' + (s.role === k ? ' on' : ''), onclick: () => { g.act({ t: 'staffRole', sid: s.id, role: k }); setTimeout(draw, 150); } }, `${d.icon} ${d.name}${k === s.fav ? ' ⭐得意' : ''}`))),
+              h('div', { class: 'roles' }, Object.entries(STAFF_ROLES).map(([k, d]) => h('button', { class: 'role' + (s.role === k ? ' on' : ''), onclick: () => { g.act({ t: 'staffRole', sid: s.id, role: k }); setTimeout(draw, 150); } },
+                `${d.icon} ${k === 'both' ? '両方' : d.name}${k === 'cashier' ? `（${SPEEDS[s.reg].name}）` : k === 'stocker' ? `（${SPEEDS[s.stk].name}）` : ''}`))),
               h('div', { class: 'muted small' }, R.desc)));
+          } else if (open && !hasStaffLicense(st, sl.no)) {
+            body.append(h('div', { class: 'scard nolic' }, head, skills(sl.reg, sl.stk),
+              h('div', { class: 'row between' }, h('span', { class: 'muted small' }, `🔑 雇用ライセンスを買うと雇えます（日給 ${yen(staffWage(sl.reg, sl.stk))}）`),
+                h('button', { class: 'btn small lic-btn', onclick: () => buyStaffLic(sl, draw) }, h('span', {}, '🔑 雇用ライセンス'), h('b', {}, yen(sl.lic))))));
           } else if (open) {
             const name = (this._hireNames ||= {})[sl.no] ?? STAFF_NAMES[Math.floor(r() * STAFF_NAMES.length)], seed = Math.floor(r() * 1e9);
             const nameInp = h('input', { class: 'inp name-inp', value: name, maxlength: 10, placeholder: '名前' });
             nameInp.oninput = () => { this._hireNames[sl.no] = nameInp.value; };
-            body.append(h('div', { class: 'scard free' }, head,
-              h('div', { class: 'row name-row' }, h('span', { class: 'muted small' }, '✏️ 名前'), nameInp, h('span', { class: 'muted small' }, `さん（${sp.name}・${fav.name}が得意）が働きたがっています`)),
+            body.append(h('div', { class: 'scard free' }, head, skills(sl.reg, sl.stk),
+              h('div', { class: 'row name-row' }, h('span', { class: 'muted small' }, '✏️ 名前'), nameInp, h('span', { class: 'muted small' }, `さんが働きたがっています（${favText(sl.reg, sl.stk)}）`)),
               h('div', { class: 'roles' }, h('button', { class: 'role hire', onclick: () => {
                 const nm = nameInp.value.trim();
                 if (!nm) { toast('名前を入れてね', 'warn'); nameInp.focus(); return; }
                 delete this._hireNames[sl.no];
                 g.act({ t: 'hire', name: nm, seed, slot: sl.no }); setTimeout(draw, 150);
-              } }, `${fav.icon} ${fav.name}として雇う（日給${yen(staffWage(sl.spd))}）`))));
+              } }, `🤝 雇う（日給${yen(staffWage(sl.reg, sl.stk))}）`))));
           } else {
-            body.append(h('div', { class: 'scard locked' }, head, h('div', { class: 'muted small' }, `🔒 お店 Lv.${sl.lv} で雇えるようになります（日給 ${yen(staffWage(sl.spd))}）`)));
+            body.append(h('div', { class: 'scard locked' }, head, skills(sl.reg, sl.stk), h('div', { class: 'muted small' }, `🔒 お店 Lv.${sl.lv} で雇用ライセンス（${yen(sl.lic)}）が買えるようになります（日給 ${yen(staffWage(sl.reg, sl.stk))}）`)));
           }
         }
       } else if (tab === 'store') {
         const fee = st.playFee ?? 0;
         body.append(
           h('div', { class: 'pc-stats' }, stat('総売上', yen(st.totalSales)), stat('来店客数', st.totalCustomers + '人'), stat('評判', '⭐' + repStars(st.rep).toFixed(1)), stat('営業時間', `8:00〜${fmtTime(closeTime())}`),
-            stat('開けたパック', (st.stats?.packs || 0) + '個'), stat('売れたシングル', (st.stats?.cardsSold || 0) + '枚'), stat('対戦したお客さん', (st.stats?.played || 0) + '人'), stat('レジの台数', `最大${checkoutLimit(st.level)}台`)),
+            stat('開けたパック', (st.stats?.packs || 0) + '個'), stat('売れたシングル', (st.stats?.cardsSold || 0) + '枚'), stat('対戦したお客さん', (st.stats?.played || 0) + '人'), stat('レジの台数', `最大${checkoutLimit(st.level)}台`),
+            stat('消臭した回数', (st.stats?.sprayed || 0) + '回'), stat('ライセンス', `${PRODUCTS_LIST.filter((p) => hasLicense(st, p.id)).length}/${PRODUCTS_LIST.length}`)),
           h('div', { class: 'ed-label' }, '🎮 プレイテーブルの利用料（1回）'),
           h('div', { class: 'row' },
             h('button', { class: 'btn small ghost', onclick: () => { g.act({ t: 'playFee', v: fee - 50 }); setTimeout(draw, 150); } }, '−50'),
@@ -206,8 +259,7 @@ export class GameUI {
             h('button', { class: 'sw' + (st.color === c ? ' on' : ''), style: { background: c }, onclick: () => { g.act({ t: 'storeName', v: st.name, c }); setTimeout(draw, 150); } }))));
       }
     };
-    const m = modal('📋 マネージャーボード', [body], { wide: true, cls: 'pcm', onClose: () => this.closed() });
-    tabs.classList.add('head-tabs'); m.el.querySelector('.modal-head').insertBefore(tabs, m.el.querySelector('.modal-head .x'));
+    const m = modal('💻 パソコン', [h('div', { class: 'pc-screen' }, tabs, body)], { wide: true, cls: 'pcm pcdesk', onClose: () => this.closed() });
     this.opened(m); draw();
     this._redraw = draw;
     this._live = () => { if (tab === 'order' || tab === 'rep') draw(); }; // 在庫・配送中・口コミは開いたままでも新しく
@@ -258,7 +310,7 @@ export class GameUI {
     if (performance.now() - (this._touchT || 0) < 900) return false;
     this._live(); return true;
   }
-  closeAll() { document.querySelectorAll('.cardview-ov').forEach((x) => x.remove()); if (this.open) { const o = this.open; this.open = null; o.close(); } }
+  closeAll() { document.querySelectorAll('.cardview-ov').forEach((x) => x.remove()); if (document.querySelector('.boxopen-ov')) { document.querySelectorAll('.boxopen-ov').forEach((x) => x.remove()); this.packOpen = false; this.g?.setUIBlock(false); } if (this.open) { const o = this.open; this.open = null; o.close(); } }
 
   // ---------- 店舗拡張ボード ----------
   openExpand() {
@@ -283,7 +335,7 @@ export class GameUI {
         const row = h('div', { class: 'xrow' }); row.style.gridTemplateColumns = cols;
         for (let c = 0; c < SALES.cols; c++) row.append(cell('b' + c + r, `売り場 ${String.fromCharCode(65 + c)}${SALES.rows - r}`, 'bay'));
         const s = stockAt(0, r);
-        row.append(s ? cell(s.id, s.name, 'stock') : h('div', { class: 'xcell office' }, h('b', {}, '💻 パソコン室'), h('span', {}, 'ボード類')));
+        row.append(s ? cell(s.id, s.name, 'stock') : h('div', { class: 'xcell office' }, h('b', {}, '💻 パソコン室'), h('span', {}, 'パソコン・ボード')));
         grid.append(row);
       }
       const street = h('div', { class: 'xrow street' }); street.style.gridTemplateColumns = cols;
@@ -314,76 +366,128 @@ export class GameUI {
     requestAnimationFrame(() => list.querySelector('.next')?.scrollIntoView({ block: 'center' }));
   }
   // ---------- バインダー（カードのコレクション・相場） ----------
-  openBinder(opts = {}) {
-    const g = this.g;
-    let sid = opts.sid || this._bSid || 1, mode = opts.tab || 'cards', filter = this._bFilter || 'all';
-    const body = h('div', { class: 'binder' });
+  // ---------- コレクションファイル（持っているカードを9ポケットのファイルで見る。棚に並べるカードもここから選ぶ） ----------
+  openBinder(opts = {}) { return this.openCollection(opts); }
+  openCollection(opts = {}) {
+    const g = this.g, pick = opts.pick || null;
+    let sid = pick ? (this._pkSid ?? 0) : (opts.sid || this._bSid || 1), mode = opts.tab === 'market' ? 'market' : opts.tab === 'rates' ? 'rates' : 'cards';
+    let filter = pick ? 'have' : (this._bFilter || 'all'), page = 0, sort = this._pkSort || 'value';
+    const body = h('div', { class: 'cfile' + (pick ? ' picking' : '') });
     const tabs = h('div', { class: 'tabs head-tabs' });
+    const spread = () => window.innerWidth >= 640 && window.innerWidth > window.innerHeight * 1.05;
+    const short = () => window.innerHeight < 520;
+    // ポケットの一覧（弾の番号順。フラッシュはノーマルと同じポケットに入る）
+    const entries = (st) => {
+      const list = [];
+      const cards = CARDS_LIST.filter((x) => !sid || x.s === sid);
+      for (const c of cards) {
+        const n = st.cards?.[c.id] || 0, nf = st.cards?.[c.id + 'f'] || 0, reg = !!st.dex?.[c.id];
+        if (filter === 'have' && !n && !nf) continue; if (filter === 'dup' && n < 2 && nf < 2) continue; if (filter === 'missing' && reg) continue;
+        list.push({ c, n, nf, reg });
+      }
+      if (pick && sort === 'value') list.sort((x, y) => cardValue(st, y.nf && !y.n ? y.c.id + 'f' : y.c.id) - cardValue(st, x.nf && !x.n ? x.c.id + 'f' : x.c.id));
+      return list;
+    };
+    const choose = async (e) => {
+      const ids = [e.n ? e.c.id : null, e.nf ? e.c.id + 'f' : null].filter(Boolean);
+      if (ids.length < 2) return ids[0];
+      return choiceBox('どちらを選ぶ？', `${e.c.name}（${e.c.r}）`, [[e.c.id, `ノーマル ×${e.n}`, `相場 ${yen(cardValue(g.store, e.c.id))}`], [e.c.id + 'f', `✨フラッシュ ×${e.nf}`, `相場 ${yen(cardValue(g.store, e.c.id + 'f'))}`]]);
+    };
+    let flipDir = 0;
     const draw = () => {
       const st = g.store;
-      this._bSid = sid; this._bFilter = filter;
+      if (!pick) { this._bSid = sid; this._bFilter = filter; } else { this._pkSid = sid; this._pkSort = sort; }
       tabs.innerHTML = '';
-      tabs.append(h('button', { class: 'tab' + (mode === 'cards' ? ' on' : ''), onclick: () => { mode = 'cards'; draw(); } }, '📒 コレクション'),
+      if (!pick) tabs.append(h('button', { class: 'tab' + (mode === 'cards' ? ' on' : ''), onclick: () => { mode = 'cards'; draw(); } }, '📒 ファイル'),
         h('button', { class: 'tab' + (mode === 'market' ? ' on' : ''), onclick: () => { mode = 'market'; draw(); } }, '📈 相場'),
         h('button', { class: 'tab' + (mode === 'rates' ? ' on' : ''), onclick: () => { mode = 'rates'; draw(); } }, '🎲 封入率'));
-      const keep = body.querySelector('.bgrid')?.scrollTop || 0;
       body.innerHTML = '';
       const all = collectionStats(st);
-      if (mode === 'rates') {
-        body.append(h('div', { class: 'rates' },
-          h('p', {}, `1パック${PACK_SIZE}枚入り。封入率は「1枚ごとの独立判定」で、5枚それぞれが下の確率で決まります（1BOXは${BOX_PACKS}パック＝${PACK_SIZE * BOX_PACKS}枚）。`),
-          h('div', { class: 'rate-list' }, CARD_RATES.slice().reverse().map(([r, p]) => h('div', { class: 'rate-row' }, h('span', { class: 'rar r-' + r }, r), h('span', {}, RARITY[r].name), h('b', {}, p + '%'),
-            h('span', { class: 'muted small' }, `1パックで約${(100 * (1 - Math.pow(1 - p / 100, PACK_SIZE))).toFixed(1)}%・1BOXに平均${(p / 100 * PACK_SIZE * BOX_PACKS).toFixed(1)}枚`))),
-            h('div', { class: 'rate-row' }, h('span', { class: 'rar flash' }, '✨'), h('span', {}, 'フラッシュ（箔付き）'), h('b', {}, FLASH_RATE + '%'), h('span', { class: 'muted small' }, `どのレア度にも付く。カードが輝き、相場は${FLASH_MULT}倍`))),
-          h('p', { class: 'muted small' }, 'HR（ハイパーレア）はSSRのカードをレインボーに、UR（ウルトラレア）はSSRのカードをゴールドに加工した特別なカードです。レアなカードほど高く売れます。'),
-          h('p', { class: 'muted small' }, `カードの相場は毎日少しずつ変わります。シングルはカードテーブルなどに並べて売れます（相場の+20%まで）。いらないカードは買取業者に相場の${Math.round(BUYBACK * 100)}%で売れます。`)));
+      if (mode === 'rates') { body.classList.add('flat'); body.append(ratesPanel()); return; }
+      body.classList.toggle('flat', mode === 'market');
+      // 見出しのインデックス（弾ごとの色つきタブ）
+      const stabs = h('div', { class: 'cf-index' });
+      if (pick) stabs.append(h('button', { class: 'cf-tab' + (!sid ? ' on' : ''), style: { '--sc': '#6b5ce7' }, onclick: () => { sid = 0; page = 0; draw(); } }, 'すべて'));
+      for (const se of SERIES) { const cs = collectionStats(st, se.id); stabs.append(h('button', { class: 'cf-tab' + (se.id === sid ? ' on' : ''), style: { '--sc': se.color }, onclick: () => { sid = se.id; page = 0; draw(); } }, h('b', {}, se.code), h('small', {}, `${cs.have}/${cs.total}`))); }
+      const owned = Object.values(st.cards || {}).reduce((a, b) => a + b, 0);
+      if (mode === 'market') {
+        const ms = sid || 1, se = SERIES_BY[ms];
+        const rows = CARDS_LIST.filter((x) => x.s === ms).sort((a, b) => cardValue(st, b.id) - cardValue(st, a.id));
+        body.append(stabs, h('div', { class: 'bhead' }, h('b', {}, `第${se.id}弾「${se.name}」の相場`), h('span', { class: 'muted small' }, '　レアなカードほど高く売れます')),
+          h('div', { class: 'bgrid market' }, rows.map((c) => {
+            const v = cardValue(st, c.id), pv = cardValuePrev(st, c.id), d = pv ? (v - pv) / pv * 100 : 0, reg = !!st.dex?.[c.id];
+            return h('div', { class: 'mrow', onclick: reg ? () => this.openCardView(c.id, draw) : null },
+              h('span', { class: 'rar r-' + c.r }, c.r), h('span', { class: 'mn' }, reg ? c.name : '？？？'), h('b', {}, yen(v)),
+              h('span', { class: 'trend ' + (d > 0.5 ? 'up' : d < -0.5 ? 'down' : 'flat') }, d > 0.5 ? `▲${d.toFixed(0)}%` : d < -0.5 ? `▼${Math.abs(d).toFixed(0)}%` : '→'),
+              h('span', { class: 'muted small' }, `手持ち ${st.cards?.[c.id] || 0}${st.cards?.[c.id + 'f'] ? `（✨${st.cards[c.id + 'f']}）` : ''}・✨${yen(cardValue(st, c.id + 'f'))}`));
+          })));
         return;
       }
-      // 弾のタブ
-      const stabs = h('div', { class: 'tabs scroll small' });
-      for (const se of SERIES) { const cs = collectionStats(st, se.id); stabs.append(h('button', { class: 'tab' + (se.id === sid ? ' on' : ''), style: { '--sc': se.color }, onclick: () => { sid = se.id; draw(); } }, `${se.code} ${se.name}`, h('span', { class: 'tcount' }, ` ${cs.have}/${cs.total}`))); }
-      const se = SERIES_BY[sid], cs = collectionStats(st, sid);
-      const owned = Object.values(st.cards || {}).reduce((a, b) => a + b, 0);
-      const head = h('div', { class: 'bhead' },
-        h('div', {}, h('b', {}, `第${se.id}弾「${se.name}」`), h('span', { class: 'muted small' }, ` ${se.theme}・お店 Lv.${se.lv} から入荷`)),
-        h('div', { class: 'bstat' }, `図鑑 ${cs.have}/${cs.total}`, h('span', { class: 'muted small' }, `　全体 ${all.have}/${all.total}種類・手持ち ${owned}枚`)));
-      body.append(stabs, head);
-      if (mode === 'cards') {
-        const fl = h('div', { class: 'row wrap small' }, [['all', 'すべて'], ['have', '持っている'], ['dup', 'ダブり'], ['missing', '未入手']].map(([k, t]) => h('button', { class: 'chip btnchip' + (filter === k ? ' on' : ''), onclick: () => { filter = k; draw(); } }, t)),
-          h('button', { class: 'btn tiny ghost', onclick: async () => { if (await confirmBox(`第${se.id}弾の N・R のダブり（1枚は残す）を買取業者にまとめて売りますか？（相場の${Math.round(BUYBACK * 100)}%）`, '売る')) { g.act({ t: 'sellDupes', maxR: 'R', s: sid }); setTimeout(draw, 150); } } }, '💱 N・Rのダブりを売る'));
-        body.append(fl);
-        const grid = h('div', { class: 'bgrid' });
-        for (const c of CARDS_LIST.filter((x) => x.s === sid)) {
-          const n = st.cards?.[c.id] || 0, reg = !!st.dex?.[c.id], shown = displayedCount(st, c.id);
-          const nfl = st.cards?.[c.id + 'f'] || 0;
-          if (filter === 'have' && !n && !nfl) continue; if (filter === 'dup' && n < 2 && nfl < 2) continue; if (filter === 'missing' && reg) continue;
-          if (!reg) { grid.append(h('div', { class: 'bslot missing' }, h('div', { class: 'bq' }, '？'), h('div', { class: 'bno' }, `${String(c.no).padStart(3, '0')} ${c.r}`))); continue; }
-          const el = cardEl(c.id, { size: 112, count: n, dim: !n, onClick: () => this.openCardView(c.id, draw) });
-          grid.append(h('div', { class: 'bslot' }, el, h('div', { class: 'bno' }, `${yen(cardValue(st, c.id))}${shown ? ` 🃏${shown}` : ''}`)));
-          // フラッシュも持っていれば、となりに並べる
-          const fk = c.id + 'f', nf = st.cards?.[fk] || 0, sf = displayedCount(st, fk);
-          if ((nf || sf) && filter !== 'missing' && (filter !== 'dup' || nf >= 2)) grid.append(h('div', { class: 'bslot' }, cardEl(fk, { size: 112, count: nf, dim: !nf, onClick: () => this.openCardView(fk, draw) }), h('div', { class: 'bno' }, `✨${yen(cardValue(st, fk))}${sf ? ` 🃏${sf}` : ''}`)));
-        }
-        if (!grid.children.length) grid.append(h('p', { class: 'muted' }, 'カードがありません。パックを開けよう！'));
-        body.append(grid);
-        requestAnimationFrame(() => { grid.scrollTop = keep; });
-      } else {
-        // 相場：この弾のカードを高い順に
-        const rows = CARDS_LIST.filter((x) => x.s === sid).sort((a, b) => cardValue(st, b.id) - cardValue(st, a.id));
-        const tbl = h('div', { class: 'bgrid market' }, rows.map((c) => {
-          const v = cardValue(st, c.id), pv = cardValuePrev(st, c.id), d = pv ? (v - pv) / pv * 100 : 0, reg = !!st.dex?.[c.id];
-          return h('div', { class: 'mrow', onclick: reg ? () => this.openCardView(c.id, draw) : null },
-            h('span', { class: 'rar r-' + c.r }, c.r), h('span', { class: 'mn' }, reg ? c.name : '？？？'), h('b', {}, yen(v)),
-            h('span', { class: 'trend ' + (d > 0.5 ? 'up' : d < -0.5 ? 'down' : 'flat') }, d > 0.5 ? `▲${d.toFixed(0)}%` : d < -0.5 ? `▼${Math.abs(d).toFixed(0)}%` : '→'),
-            h('span', { class: 'muted small' }, `手持ち ${st.cards?.[c.id] || 0}${st.cards?.[c.id + 'f'] ? `（✨${st.cards[c.id + 'f']}）` : ''}・✨${yen(cardValue(st, c.id + 'f'))}`));
-        }));
-        body.append(tbl);
-      }
+      const COLS = short() ? 4 : 3, ROWS = short() ? 2 : 3, PER = COLS * ROWS;
+      const list = entries(st), sp = spread(), per = sp ? PER * 2 : PER;
+      const pages = Math.max(1, Math.ceil(list.length / per));
+      page = Math.max(0, Math.min(page, pages - 1));
+      const se = SERIES_BY[sid];
+      const cs = sid ? collectionStats(st, sid) : all;
+      const tools = h('div', { class: 'cf-tools' },
+        h('div', { class: 'cf-title' }, pick ? h('b', {}, '🃏 並べるカードをタップ') : h('b', {}, se ? `${se.code}「${se.name}」` : 'すべての弾'),
+          h('span', { class: 'muted small' }, ` 図鑑 ${cs.have}/${cs.total}・全体 ${all.have}/${all.total}種類・手持ち ${owned}枚`)),
+        h('div', { class: 'row wrap small' },
+          ...(pick ? [h('button', { class: 'chip btnchip' + (sort === 'value' ? ' on' : ''), onclick: () => { sort = 'value'; page = 0; draw(); } }, '💴 高い順'), h('button', { class: 'chip btnchip' + (sort === 'no' ? ' on' : ''), onclick: () => { sort = 'no'; page = 0; draw(); } }, '🔢 番号順')]
+            : [['all', 'すべて'], ['have', '持っている'], ['dup', 'ダブり'], ['missing', '未入手']].map(([k, t]) => h('button', { class: 'chip btnchip' + (filter === k ? ' on' : ''), onclick: () => { filter = k; page = 0; draw(); } }, t))),
+          !pick && se ? h('button', { class: 'btn tiny ghost', onclick: async () => { if (await confirmBox(`第${se.id}弾の N・R のダブり（1枚は残す・フラッシュは残す）を買取業者にまとめて売りますか？（相場の${Math.round(BUYBACK * 100)}%）`, '売る')) { g.act({ t: 'sellDupes', maxR: 'R', s: sid }); setTimeout(draw, 150); } } }, '💱 N・Rのダブりを売る') : null));
+      // ポケットの大きさ：画面に9ポケット×（1〜2ページ）がおさまるように
+      const W = window.innerWidth, H = window.innerHeight, sk = W + 'x' + H + (sp ? 's' : '1');
+      const fit = (bw, bh) => Math.floor(Math.max(40, Math.min(132, ((bh - (H < 520 ? 30 : 52)) / ROWS - 21) / 1.397, ((sp ? (bw - 26) / 2 : bw - 18) - 40) / COLS - 10)));
+      const size = this._cfSz?.k === sk ? this._cfSz.s : fit(Math.min(W - 40, sp ? 1100 : 520), H - (H < 520 ? 170 : 300));
+      const pocket = (e) => {
+        if (!e) return h('div', { class: 'cf-pocket empty' });
+        if (!e.reg) return h('div', { class: 'cf-pocket missing', style: { '--w': size + 'px' } }, h('div', { class: 'bq' }, '？'), h('div', { class: 'bno' }, `${String(e.c.no).padStart(3, '0')} ${e.c.r}`));
+        const show = e.n ? e.c.id : e.nf ? e.c.id + 'f' : e.c.id;
+        const open = async () => { const cid = pick ? await choose(e) : show; if (!cid) return; if (pick) { m.close(); pick(cid); } else this.openCardView(cid, draw); };
+        const el = cardEl(show, { size, count: (e.n || e.nf) ? (e.n || e.nf) : null, dim: !e.n && !e.nf, onClick: open });
+        const fl = e.n && e.nf ? h('button', { class: 'cf-fl', onclick: (ev) => { ev.stopPropagation(); if (pick) { m.close(); pick(e.c.id + 'f'); } else this.openCardView(e.c.id + 'f', draw); } }, `✨×${e.nf}`) : null;
+        const shown = displayedCount(st, e.c.id) + displayedCount(st, e.c.id + 'f');
+        return h('div', { class: 'cf-pocket', style: { '--w': size + 'px' } }, el, fl, h('div', { class: 'bno' }, `${yen(cardValue(st, show))}${shown ? ` 🃏${shown}` : ''}`));
+      };
+      const pageEl = (k) => {
+        const items = list.slice(k * PER, k * PER + PER);
+        const pg = h('div', { class: 'cf-page' + (k % 2 ? ' right' : ' left'), style: { '--cols': COLS } });
+        for (let i = 0; i < PER; i++) pg.append(pocket(items[i]));
+        pg.append(h('div', { class: 'cf-pno' }, `${k + 1}`));
+        return pg;
+      };
+      const book = h('div', { class: 'cf-book' + (sp ? ' spread' : ' single') + (flipDir > 0 ? ' flip-next' : flipDir < 0 ? ' flip-prev' : '') + (!this._cfSeen ? ' opening' : '') });
+      this._cfSeen = true; flipDir = 0;
+      if (sp) book.append(pageEl(page * 2), h('div', { class: 'cf-rings' }, ...[0, 1, 2, 3].map(() => h('i'))), pageEl(page * 2 + 1));
+      else book.append(h('div', { class: 'cf-rings side' }, ...[0, 1, 2].map(() => h('i'))), pageEl(page));
+      if (!list.length) book.append(h('div', { class: 'cf-empty' }, pick ? '並べられるカードがありません。パックを開けよう！' : 'カードがありません。パックを開けよう！'));
+      const go = (d) => { const np = page + d; if (np < 0 || np >= pages) return; page = np; flipDir = d; g.app.sfx.play('flip', 0.5); draw(); };
+      // スワイプでページをめくる
+      let sx = null;
+      book.addEventListener('pointerdown', (ev) => { sx = ev.clientX; });
+      book.addEventListener('pointerup', (ev) => { if (sx == null) return; const dx = ev.clientX - sx; sx = null; if (Math.abs(dx) > 60) go(dx < 0 ? 1 : -1); });
+      const nav = h('div', { class: 'cf-nav' },
+        h('button', { class: 'btn small ghost', disabled: page <= 0, onclick: () => go(-1) }, '◀ 前のページ'),
+        h('span', { class: 'cf-pages' }, `${page + 1} / ${pages}`),
+        h('button', { class: 'btn small ghost', disabled: page >= pages - 1, onclick: () => go(1) }, '次のページ ▶'));
+      body.append(h('div', { class: 'cf-head' }, stabs, tools), book, nav);
+      this._cfGo = go;
+      // 実際のファイルの大きさに合わせてポケットの大きさを決め直す（1回だけ）
+      requestAnimationFrame(() => {
+        const bw = book.clientWidth, bh = book.clientHeight; if (!bw || !bh) return;
+        const s2 = fit(bw, bh);
+        if (Math.abs(s2 - size) > 3 && this._cfSz?.k !== sk) { this._cfSz = { k: sk, s: s2 }; draw(); } else this._cfSz = { k: sk, s: size };
+      });
     };
-    const m = modal('📒 バインダー', [body], { wide: true, cls: 'pcm binderm', onClose: () => this.closed() });
+    const m = modal(pick ? '🃏 コレクションファイルから並べる' : '📒 コレクションファイル', [body], { wide: true, cls: 'pcm cfm', onClose: () => { window.removeEventListener('keydown', key); this.closed(); } });
+    const key = (ev) => { if (ev.key === 'ArrowRight') this._cfGo?.(1); else if (ev.key === 'ArrowLeft') this._cfGo?.(-1); };
+    window.addEventListener('keydown', key);
     m.el.querySelector('.modal-head').insertBefore(tabs, m.el.querySelector('.modal-head .x'));
+    this._cfSeen = false;
     this.opened(m); draw();
     this._redraw = draw;
+    g.app.sfx.play('flip', 0.6);
   }
   // カード1枚を大きく見る（値段・買取）
   openCardView(cid, after) {
@@ -404,24 +508,7 @@ export class GameUI {
   // カードテーブルに置くカードを選ぶ
   openCardPicker(fid, ci) {
     const g = this.g;
-    let sid = this._pSid || 0, sort = this._pSort || 'value';
-    const body = h('div', { class: 'picker' });
-    const draw = () => {
-      const st = g.store;
-      this._pSid = sid; this._pSort = sort;
-      body.innerHTML = '';
-      const tabs = h('div', { class: 'tabs scroll small' }, h('button', { class: 'tab' + (!sid ? ' on' : ''), onclick: () => { sid = 0; draw(); } }, 'すべて'),
-        SERIES.map((se) => h('button', { class: 'tab' + (se.id === sid ? ' on' : ''), onclick: () => { sid = se.id; draw(); } }, se.code)),
-        h('button', { class: 'tab' + (sort === 'value' ? ' on' : ''), onclick: () => { sort = sort === 'value' ? 'no' : 'value'; draw(); } }, sort === 'value' ? '💴 高い順' : '🔢 番号順'));
-      const list = Object.entries(st.cards || {}).filter(([cid, n]) => n > 0 && CARDS[cid] && (!sid || CARDS[cid].s === sid)).map(([cid]) => cid);
-      list.sort(sort === 'value' ? (a, b) => cardValue(st, b) - cardValue(st, a) : (a, b) => (CARDS[a].s - CARDS[b].s) || (CARDS[a].no - CARDS[b].no));
-      const grid = h('div', { class: 'bgrid' }, list.length ? list.map((cid) => h('div', { class: 'bslot' },
-        cardEl(cid, { size: 104, count: st.cards[cid], onClick: () => { g.act({ t: 'cardPut', fid, ci, cid }); m.close(); } }),
-        h('div', { class: 'bno' }, yen(cardPrice(st, cid))))) : h('p', { class: 'muted' }, 'カードを持っていません。パックやBOXを開けてカードを手に入れよう！'));
-      body.append(tabs, grid);
-    };
-    const m = modal('🃏 並べるカードを選ぶ', [body], { wide: true, cls: 'pcm', onClose: () => this.closed() });
-    this.opened(m); draw();
+    this.openCollection({ pick: (cid) => { g.act({ t: 'cardPut', fid, ci, cid }); } });
   }
   // おまかせ陳列
   openAutoDisplay(fid) {
@@ -477,13 +564,58 @@ export class GameUI {
     this.closeAll();
     this.packOpen = true; g.setUIBlock(true);
     const held = () => g.held();
-    const canMore = () => { const b = held(); return b && b.n > 0 && seriesOfProduct(b.p) === e.s && (e.kind === 'pack' ? isPack(b.p) : isBoosterBox(b.p)); };
+    // 手に持ったパックから開けたとき：手にパックが残っていれば続けて開けられる
+    if (e.hand) {
+      const left = () => (g.hand()?.t === 'packs' ? g.hand().a.length : 0);
+      packOpening(e, {
+        sfx: (n) => g.app.sfx.play(n),
+        onClose: () => { this.packOpen = false; g.setUIBlock(false); },
+        onMore: left() > 0 ? () => { this.packOpen = false; g.setUIBlock(false); g.act({ t: 'handOpen' }); } : null,
+        moreLabel: `もう1パック開ける（手にあと${left()}パック）`,
+        onAll: left() > 1 ? () => { this.packOpen = false; g.setUIBlock(false); g.act({ t: 'handOpen', all: true }); } : null,
+        allLabel: `残り${left()}パックをまとめて開ける`,
+      });
+      return;
+    }
+    const canMore = () => { const b = held(); return b && b.n > 0 && seriesOfProduct(b.p) === e.s && isPack(b.p); };
     packOpening(e, {
       sfx: (n) => g.app.sfx.play(n),
       onClose: () => { this.packOpen = false; g.setUIBlock(false); },
       onMore: canMore() ? () => { this.packOpen = false; g.setUIBlock(false); g.act({ t: 'openPack' }); } : null,
-      moreLabel: e.kind === 'pack' ? `もう1パック開ける（のこり${(held()?.n || 0)}）` : `もう1BOX開ける（のこり${(held()?.n || 0)}）`,
+      moreLabel: `もう1パック開ける（のこり${(held()?.n || 0)}）`,
     });
+  }
+  // BOXを開けたとき：10パックが出てくる → そのまま開封／途中でやめる（手に持ったまま棚に並べられる）
+  showBoxOpened(e) {
+    const g = this.g, se = SERIES_BY[e.s];
+    this.closeAll();
+    this.packOpen = true; g.setUIBlock(true);
+    const ov = h('div', { class: 'boxopen-ov' });
+    const close = () => { ov.classList.add('out'); setTimeout(() => ov.remove(), 220); this.packOpen = false; g.setUIBlock(false); };
+    const left = () => (g.hand()?.t === 'packs' ? g.hand().a.length : 0);
+    const fan = h('div', { class: 'bo-fan' });
+    const n = e.n || 10;
+    for (let i = 0; i < n; i++) {
+      const c = h('canvas', { class: 'bo-pack' }); c.width = 120; c.height = 200;
+      const paint = (src) => { const x = c.getContext('2d'); x.clearRect(0, 0, c.width, c.height); x.drawImage(src, 0, 0, c.width, c.height); };
+      paint(packCanvas(e.s, 240, paint));
+      const k = i - (n - 1) / 2;
+      c.style.setProperty('--r', (k * 5) + 'deg'); c.style.setProperty('--x', (k * 34) + 'px'); c.style.setProperty('--y', (Math.abs(k) * 5) + 'px'); c.style.animationDelay = (i * 0.05) + 's';
+      fan.append(c);
+    }
+    const one = () => { close(); setTimeout(() => g.act({ t: 'handOpen' }), 60); };
+    const all = () => { close(); setTimeout(() => g.act({ t: 'handOpen', all: true }), 60); };
+    ov.append(h('div', { class: 'po-bg', style: { '--c1': se.color, '--c2': se.color2 } }),
+      h('div', { class: 'bo-card' },
+        h('div', { class: 'bo-title' }, h('b', {}, `🎁 ${se.code}「${se.name}」BOXを開けた！`), h('span', {}, `${n}パックが出てきた`)),
+        fan,
+        h('div', { class: 'bo-btns' },
+          h('button', { class: 'btn big', onclick: one }, '🎴 1パックずつ開封'),
+          h('button', { class: 'btn big alt', onclick: all }, `⚡ ${n}パックまとめて開封`),
+          h('button', { class: 'btn ghost', onclick: close }, '✋ やめる（手に持ったまま）')),
+        h('div', { class: 'muted small bo-note' }, `やめたパックは手に持ったまま。棚を狙って「棚に置く」で売り物にもできます（手にあと${left()}パック）`)));
+    document.body.append(ov);
+    g.app.sfx.play('boxopen');
   }
   // ---------- ポーズ ----------
   openPause() {
@@ -491,10 +623,10 @@ export class GameUI {
     const m = modal('⏸ メニュー', [
       h('div', { class: 'col' },
         h('button', { class: 'btn big', onclick: () => m.close() }, '▶ 再開'),
-        h('button', { class: 'btn ghost', onclick: () => { m.close(); this.openBinder(); } }, '📒 バインダー（カードのコレクション）'),
+        h('button', { class: 'btn ghost', onclick: () => { m.close(); this.openBinder(); } }, '📒 コレクションファイル'),
         h('button', { class: 'btn ghost', onclick: () => { m.close(); this.openLevel(); } }, '⭐ レベルとできるようになること'),
         h('button', { class: 'btn ghost', onclick: () => { m.close(); this.openRep(); } }, '💬 評判と口コミ'),
-        h('div', { class: 'muted small', style: { textAlign: 'center' } }, '📋 発注・従業員・🗺️ 店舗拡張は、パソコン室（入口の右）のボードの前でできます。📒 バインダー（C）と 💬 評判（Tab）はいつでも見られます'),
+        h('div', { class: 'muted small', style: { textAlign: 'center' } }, '💻 仕入れ・ライセンス・従業員はパソコン室（入口の右）のパソコン、🗺️ 店舗拡張はとなりのボードでできます。📒 コレクションファイル（C）と 💬 評判（Tab）はいつでも見られます'),
         h('button', { class: 'btn ghost', onclick: () => { m.close(); g.app.openSettingsInGame(); } }, '⚙️ 設定'),
         h('button', { class: 'btn ghost', onclick: () => { m.close(); g.help(); } }, '❓ 遊び方'),
         g.roomId ? h('div', { class: 'chip' }, `ルームID：${g.roomId}`) : null,
@@ -515,6 +647,7 @@ export class GameUI {
       d.buyback ? row('カード買取', '+' + yen(d.buyback), 'plus') : null, d.vend ? row('自販機', '+' + yen(d.vend), 'plus') : null, d.recycle ? row('リサイクル', '+' + yen(d.recycle), 'plus') : null,
       h('div', { class: 'sum-h' }, '💸 支出'), bar(cost, 'minus'),
       row('仕入れ', '−' + yen(d.orders), 'minus'), d.ship ? row('送料', '−' + yen(d.ship), 'minus') : null, row('人件費', '−' + yen(d.wages), 'minus'), row('光熱費・家賃', '−' + yen(d.bills), 'minus'),
+      d.lic ? row('ライセンス（利益の計算には入れない）', '−' + yen(d.lic), 'sub') : null,
       h('div', { class: 'sum-total ' + (d.profit >= 0 ? 'plus' : 'minus') }, h('span', {}, '本日の利益'), h('b', {}, (d.profit >= 0 ? '+' : '−') + yen(Math.abs(d.profit)))),
       diff == null ? null : h('div', { class: 'muted small right' }, `前日比 ${diff >= 0 ? '▲ +' : '▼ −'}${yen(Math.abs(diff))}`),
       row('所持金', yen(d.money)));
@@ -526,7 +659,8 @@ export class GameUI {
       top.length ? h('div', { class: 'sum-top' }, top.map(([p, [n, rev]], i) => h('div', { class: 'sum-item' }, h('span', { class: 'rk' }, ['🥇', '🥈', '🥉'][i] || (i + 1) + '.'), h('span', { class: 'ic' }, iconOf(p)),
         h('span', { class: 'nm' }, nameOf(p)), h('span', { class: 'muted small' }, `${n}個`), h('b', {}, yen(rev))))) : h('p', { class: 'muted small' }, '今日は何も売れませんでした…'),
       h('div', { class: 'sum-h' }, '📈 お店の様子'),
-      row('お会計したお客さん', d.served + '人'), d.packs ? row('開けたパック', d.packs + '個') : null, row('怒って帰ったお客さん', d.lost + '人', d.lost ? 'minus' : ''), row('獲得経験値', d.xp + ' XP'), row('評判', `⭐ ${repStars(d.rep).toFixed(1)}` + (d.repPrev != null ? `（${d.rep >= d.repPrev ? '▲' : '▼'}${Math.abs(repStars(d.rep) - repStars(d.repPrev)).toFixed(1)}）` : ''), d.repPrev != null && d.rep < d.repPrev ? 'minus' : ''),
+      row('お会計したお客さん', d.served + '人'), d.packs ? row('開けたパック', d.packs + '個') : null, row('怒って帰ったお客さん', d.lost + '人', d.lost ? 'minus' : ''),
+      d.smelly ? row('臭いお客さん', `${d.smelly}人（消臭 ${d.cleaned || 0}人${d.smellLost ? `・臭いで帰った ${d.smellLost}人` : ''}）`, d.smellLost ? 'minus' : '') : null, row('獲得経験値', d.xp + ' XP'), row('評判', `⭐ ${repStars(d.rep).toFixed(1)}` + (d.repPrev != null ? `（${d.rep >= d.repPrev ? '▲' : '▼'}${Math.abs(repStars(d.rep) - repStars(d.repPrev)).toFixed(1)}）` : ''), d.repPrev != null && d.rep < d.repPrev ? 'minus' : ''),
       (() => { const rv = d.rv || [0, 0, 0, 0, 0], n = rv.reduce((a, b) => a + b, 0); return n ? row('今日の評価', `★${(rv.reduce((a, c, i) => a + c * (i + 1), 0) / n).toFixed(1)}（${n}人）`) : null; })(),
       row('お店のレベル', 'Lv.' + d.level + (d.level >= MAX_LEVEL ? ' MAX' : '')));
     const body = [
@@ -722,6 +856,15 @@ function priceRow(g, st, p, stocked, redraw, big, sm) {
       h('button', { class: 'btn small ghost', onclick: () => set(nice(mk * 1.1)) }, '+10%'), h('button', { class: 'btn small ghost', onclick: () => set(nice(mk * 1.2)) }, '+20%')) : null);
 }
 // 発注画面などの商品の絵（パック・BOXは本物の絵）
+function ratesPanel() {
+  return h('div', { class: 'rates' },
+    h('p', {}, `1パック${PACK_SIZE}枚入り。封入率は「1枚ごとの独立判定」で、5枚それぞれが下の確率で決まります（1BOXは${BOX_PACKS}パック＝${PACK_SIZE * BOX_PACKS}枚）。`),
+    h('div', { class: 'rate-list' }, CARD_RATES.slice().reverse().map(([r, p]) => h('div', { class: 'rate-row' }, h('span', { class: 'rar r-' + r }, r), h('span', {}, RARITY[r].name), h('b', {}, p + '%'),
+      h('span', { class: 'muted small' }, `1パックで約${(100 * (1 - Math.pow(1 - p / 100, PACK_SIZE))).toFixed(1)}%・1BOXに平均${(p / 100 * PACK_SIZE * BOX_PACKS).toFixed(1)}枚`))),
+      h('div', { class: 'rate-row' }, h('span', { class: 'rar flash' }, '✨'), h('span', {}, 'フラッシュ（箔付き）'), h('b', {}, FLASH_RATE + '%'), h('span', { class: 'muted small' }, `どのレア度にも付く。カードが輝き、相場は${FLASH_MULT}倍`))),
+    h('p', { class: 'muted small' }, 'HR（ハイパーレア）はSSRのカードをレインボーに、UR（ウルトラレア）はSSRのカードをゴールドに加工した特別なカードです。レアなカードほど高く売れます。'),
+    h('p', { class: 'muted small' }, `カードの相場は毎日少しずつ変わります。シングルはカードの棚に並べて売れます（相場の+20%まで）。いらないカードは買取業者に相場の${Math.round(BUYBACK * 100)}%で売れます。`));
+}
 function prodThumb(p, small) {
   if (p.series) {
     const isBox = p.cat === 'box', W = isBox ? 100 : 60, H = 100 * (isBox ? 0.6 : 1);
@@ -730,6 +873,6 @@ function prodThumb(p, small) {
     draw(isBox ? boxCanvas(p.series, 'front', 500, 300, draw) : packCanvas(p.series, 300, draw));
     return c;
   }
-  return h('div', { class: 'pe' + (small ? ' sm' : '') }, p.icon);
+  return h('div', { class: 'pe tile' + (small ? ' sm' : ''), style: { '--pc': p.color || '#8a7bd8' } }, p.icon);
 }
 export { escapeText };

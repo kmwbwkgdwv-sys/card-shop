@@ -429,7 +429,7 @@ function barcode(g, x, y, w, h) {
   while (cx < x + w) { const bw = 0.8 + r() * 2.2; if (r() < 0.55) g.fillRect(cx, y, bw, h); cx += bw + 0.8; }
 }
 function drawLabel(g, w, h, p, variant) {
-  const c = p.color, brand = BRANDS[p.id] || 'ANIMON';
+  const c = p.color, brand = p.brand || BRANDS[p.id] || 'ANIMON';
   const hsl = hexToHsl(c);
   const light = hsl.l > 0.6;
   const fg = light ? '#262626' : '#ffffff';
@@ -447,7 +447,7 @@ function drawLabel(g, w, h, p, variant) {
     g.save(); g.shadowColor = 'rgba(0,0,0,0.35)'; g.shadowBlur = 10; g.shadowOffsetY = 4; emoji(g, p.icon, cx, h * 0.46, h * 0.36); g.restore();
     g.fillStyle = '#fff'; fitText(g, p.name, w * 0.42, h * 0.13, 900, SANS); g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(p.name, cx, h * 0.89);
     g.fillStyle = fg; fitText(g, brand, w * 0.22, h * 0.15, 900, SERIF); g.fillText(brand, w * 0.18, h * 0.38); g.fillText(brand, w * 0.82, h * 0.38);
-    g.fillStyle = light ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.85)'; g.font = `700 ${h * 0.07}px ${SANS}`; g.fillText('内容量 ' + (NET[p.id] || ''), w * 0.18, h * 0.55); g.fillText('内容量 ' + (NET[p.id] || ''), w * 0.82, h * 0.55);
+    g.fillStyle = light ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.85)'; g.font = `700 ${h * 0.07}px ${SANS}`; g.fillText('内容量 ' + (p.net || NET[p.id] || ''), w * 0.18, h * 0.55); g.fillText('内容量 ' + (p.net || NET[p.id] || ''), w * 0.82, h * 0.55);
     barcode(g, w * 0.04, h * 0.6, w * 0.08, h * 0.12);
     const sh = g.createLinearGradient(0, 0, w, 0); sh.addColorStop(0.35, 'rgba(255,255,255,0)'); sh.addColorStop(0.45, 'rgba(255,255,255,0.22)'); sh.addColorStop(0.5, 'rgba(255,255,255,0)');
     g.fillStyle = sh; g.fillRect(0, 0, w, h);
@@ -475,7 +475,7 @@ function drawLabel(g, w, h, p, variant) {
     g.fillStyle = '#c62828'; g.font = `900 ${w * 0.055}px ${SANS}`; g.fillText('NEW', w * 0.82, wy + 5);
   }
   g.fillStyle = fg; fitText(g, p.name, w * 0.86, h * 0.1, 900, SANS); g.fillText(p.name, w / 2, h * 0.82);
-  g.fillStyle = light ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.85)'; g.font = `700 ${h * 0.045}px ${SANS}`; g.fillText('内容量 ' + (NET[p.id] || ''), w * 0.3, h * 0.93);
+  g.fillStyle = light ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.85)'; g.font = `700 ${h * 0.045}px ${SANS}`; g.fillText('内容量 ' + (p.net || NET[p.id] || ''), w * 0.3, h * 0.93);
   barcode(g, w * 0.62, h * 0.885, w * 0.28, h * 0.07);
   const sh = g.createLinearGradient(0, 0, w, h); sh.addColorStop(0.2, 'rgba(255,255,255,0)'); sh.addColorStop(0.32, 'rgba(255,255,255,0.18)'); sh.addColorStop(0.42, 'rgba(255,255,255,0)');
   g.fillStyle = sh; g.fillRect(0, 0, w, h);
@@ -500,9 +500,9 @@ function drawBoxSide(g, w, h, p) {
   g.strokeStyle = ink; g.lineWidth = 6; rr(g, w * 0.08, h * 0.12, w * 0.84, h * 0.7, 18); g.stroke();
   g.globalAlpha = 0.9;
   g.fillStyle = ink; g.textAlign = 'center'; g.textBaseline = 'middle';
-  fitText(g, BRANDS[p.id] || 'ANIMON', w * 0.7, 56, 900, SERIF); g.fillText(BRANDS[p.id] || 'ANIMON', w / 2, h * 0.26);
+  fitText(g, p.brand || BRANDS[p.id] || 'ANIMON', w * 0.7, 56, 900, SERIF); g.fillText(p.brand || BRANDS[p.id] || 'ANIMON', w / 2, h * 0.26);
   fitText(g, p.name, w * 0.7, 44, 900, SANS); g.fillText(p.name, w / 2, h * 0.43);
-  g.font = `700 26px ${SANS}`; g.fillText(`${NET[p.id] || ''} × ${p.qty}`, w / 2, h * 0.56);
+  g.font = `700 26px ${SANS}`; g.fillText(`${p.net || NET[p.id] || ''} × ${p.qty}`, w / 2, h * 0.56);
   g.globalAlpha = 0.75; emoji(g, p.icon, w * 0.2, h * 0.68, 46); g.globalAlpha = 0.9;
   barcode(g, w * 0.55, h * 0.64, w * 0.3, h * 0.1);
   g.font = `700 20px ${SANS}`; g.fillText('↑↑ 天地無用 ↑↑  ワレモノ注意', w / 2, h * 0.92);
@@ -610,7 +610,7 @@ const bubbleCache = new Map();
 export function bubbleTexture(kind, text) {
   const key = kind + (text || '');
   if (bubbleCache.has(key)) return bubbleCache.get(key);
-  const ICON = { none: '❓', empty: '😞', pricey: '💸', cheap: '🤩', angry: '💢', wait: '⌛', happy: '😊', ok: '🙂', chat: '', notag: '🏷️', nobox: '📦', trash: '🗑️', rackfull: '🗄️', nolabel: '🏷️❓', noreg: '🧾❓', look: '👀', wow: '🤩', game: '🎮' };
+  const ICON = { none: '❓', empty: '😞', pricey: '💸', cheap: '🤩', angry: '💢', wait: '⌛', happy: '😊', ok: '🙂', chat: '', notag: '🏷️', nobox: '📦', trash: '🗑️', rackfull: '🗄️', nolabel: '🏷️❓', noreg: '🧾❓', look: '👀', wow: '🤩', game: '🎮', stink: '🤢', fresh: '✨' };
   const isChat = kind === 'chat';
   const W = isChat ? 512 : 128, H = 128;
   const t = canvasTex(W, H, (g, w, h) => {

@@ -67,7 +67,7 @@ for (let s = 1; s <= 8; s++) {
 }
 Object.assign(B, {
   // スリーブ：細長い箱パッケージ（中にスリーブの束）
-  sleeve: (p, P) => sleeveBox(p, P, false),
+  sleeve: (p, P) => sleeveBox(p, P, !!p.premium),
   psleeve: (p, P) => sleeveBox(p, P, true),
   deckcase: (p, P) => {
     const [w, h, d] = p.size;
@@ -119,8 +119,72 @@ Object.assign(B, {
     P.push({ g: box(w, 0.012, d), m: C(p.color, { r: 0.5 }) });
     P.push({ g: T(box(w, 0.03, d), 0, h - 0.03), m: L(p, 'front') });
     P.push({ g: T(plane(w - 0.01, h - 0.045), 0, (h - 0.03) / 2, d / 2), m: mat(0xffffff, { r: 0.05, t: true, op: 0.18 }) });
-    const ct = liveTex('fig', (upd) => cardCanvas('1-014', 128, upd));
-    P.push({ g: T(plane(w * 0.75, h * 0.62), 0, 0.015 + h * 0.31, 0), m: foilMat('fig', ct, { at: 0.5 }) });
+    const art = p.id === 'figure2' ? '8-030' : '1-014';
+    const ct = liveTex('fig' + art, (upd) => cardCanvas(art, 128, upd));
+    P.push({ g: T(plane(w * 0.75, h * 0.62), 0, 0.015 + h * 0.31, 0), m: foilMat('fig' + art, ct, { at: 0.5 }) });
+  },
+  // ぬいぐるみ：ころんとした体と頭、耳・目・ほっぺ（アニモンごとに形を少し変える）
+  plush: (p, P) => {
+    const [w, h, d] = p.size, mon = p.mon || 'chupi';
+    const fur = C(p.color, { r: 0.97 }), belly = C(0xfff7ea, { r: 0.97 }), eye = C(0x1d1d24, { r: 0.25 }), blush = C(0xff9fb2, { r: 0.9 });
+    const R = Math.min(w, d) * 0.5;
+    P.push({ g: T(sph(R * 0.86, 16, 12), 0, R * 0.8, 0, 0, 0, 0, 1, 0.92, 0.9), m: fur });
+    P.push({ g: T(sph(R * 0.5, 12, 10), 0, R * 0.7, R * 0.42, 0, 0, 0, 1, 1.05, 0.5), m: belly });
+    const hy = R * 1.55, hr = R * 0.72;
+    P.push({ g: T(sph(hr, 16, 12), 0, hy, R * 0.05), m: fur });
+    for (const sx of [-1, 1]) {
+      P.push({ g: T(sph(hr * 0.13, 8, 6), sx * hr * 0.36, hy + hr * 0.08, R * 0.05 + hr * 0.9, 0, 0, 0, 1, 1.2, 0.5), m: eye });
+      P.push({ g: T(sph(hr * 0.14, 8, 6), sx * hr * 0.6, hy - hr * 0.22, R * 0.05 + hr * 0.75, 0, 0, 0, 1, 0.6, 0.4), m: blush });
+      P.push({ g: T(sph(R * 0.22, 8, 6), sx * R * 0.55, R * 0.18, R * 0.35, 0, 0, 0, 1, 0.7, 1.2), m: fur }); // 足
+      P.push({ g: T(sph(R * 0.2, 8, 6), sx * R * 0.82, R * 0.85, R * 0.15, 0, 0, sx * 0.6, 1, 1.5, 0.9), m: fur }); // 手
+      if (mon === 'cat' || mon === 'bear') P.push({ g: T(cone(hr * 0.36, hr * (mon === 'cat' ? 0.6 : 0.3), 10), sx * hr * 0.55, hy + hr * 0.62, 0, 0, 0, sx * -0.35), m: fur });
+      if (mon === 'sheep') P.push({ g: T(torus(hr * 0.22, hr * 0.08, 6, 12), sx * hr * 0.85, hy + hr * 0.3, 0, 0, Math.PI / 2), m: C(0x8a5a3a, { r: 0.6 }) });
+    }
+    if (mon === 'chupi') { P.push({ g: T(cone(hr * 0.22, hr * 0.4, 8), 0, hy - hr * 0.12, R * 0.05 + hr * 0.92, Math.PI / 2), m: C(0xffa53a, { r: 0.6 }) }); P.push({ g: T(sph(hr * 0.35, 8, 6), 0, hy + hr * 0.95, 0, 0, 0, 0, 0.5, 1.2, 0.8), m: fur }); }
+    if (mon === 'sheep') P.push({ g: T(sph(hr * 0.75, 12, 8), 0, hy + hr * 0.55, -hr * 0.1, 0, 0, 0, 1.1, 0.55, 1), m: C(0xffffff, { r: 1 }) });
+    // タグ
+    P.push({ g: T(box(0.03, 0.04, 0.003), R * 0.7, R * 0.4, R * 0.6, 0, 0.5), m: L(p, 'front') });
+  },
+  // 缶バッジ・キーホルダー：台紙に付いたグッズ
+  badge: (p, P) => {
+    const [w, h, d] = p.size;
+    P.push({ g: T(box(w, h, 0.004), 0, 0, 0), m: L(p, 'front') });
+    const t = liveTex('badge' + p.id, (upd) => cardCanvas(p.id === 'badge' ? '1-028' : '2-030', 128, upd));
+    P.push({ g: T(cyl(w * 0.36, w * 0.36, 0.008, 20), 0, h * 0.42, 0.006, Math.PI / 2), m: foilMat('badgeM' + p.id, t, { r: 0.2, m: 0.3 }) });
+    P.push({ g: T(new THREE.CylinderGeometry(w * 0.38, w * 0.38, d * 0.5, 20, 1, true), 0, h * 0.42, 0.006, Math.PI / 2), m: mat(0xffffff, { r: 0.05, t: true, op: 0.3 }) });
+  },
+  // アクリルスタンド：透明な板にキャラの絵、下に台座
+  acryl: (p, P) => {
+    const [w, h, d] = p.size;
+    P.push({ g: T(rbox(w, 0.012, d, 0.006), 0, 0, 0), m: mat(0xeaf6ff, { r: 0.05, t: true, op: 0.5 }) });
+    const t = liveTex('acryl', (upd) => cardCanvas('3-031', 160, upd));
+    P.push({ g: T(plane(w * 0.9, h * 0.9), 0, 0.012 + h * 0.45, 0), m: foilMat('acrylM', t, { at: 0.5, side: THREE.DoubleSide }) });
+    P.push({ g: T(box(w * 0.96, h * 0.95, 0.004), 0, 0.01, 0.003), m: mat(0xffffff, { r: 0.05, t: true, op: 0.18 }) });
+  },
+  // 消臭スプレー：缶とノズル
+  spray: (p, P) => {
+    const [w, h] = p.size, r = w / 2;
+    P.push({ g: cyl(r, r, h * 0.8, 18), m: C(0xf4f7f6, { r: 0.25, m: 0.6 }) });
+    P.push({ g: T(cyl(r * 1.01, r * 1.01, h * 0.55, 18, true), 0, h * 0.1), m: L(p, 'wrap') });
+    P.push({ g: T(cyl(r * 0.8, r, h * 0.06, 16), 0, h * 0.8), m: C(0xdfe5e3, { r: 0.2, m: 0.7 }) });
+    P.push({ g: T(cyl(r * 0.55, r * 0.6, h * 0.12, 14), 0, h * 0.86), m: C(p.color, { r: 0.4 }) });
+    P.push({ g: T(box(r * 0.3, h * 0.04, r * 0.5), 0, h * 0.94, r * 0.25), m: C(0xffffff, { r: 0.4 }) });
+  },
+  // マンガ：表紙の絵
+  manga: (p, P) => {
+    const [w, h, d] = p.size;
+    P.push({ g: box(w, h, d), m: C(0xf4efe3, { r: 0.9 }) });
+    const t = liveTex('manga', (upd) => cardCanvas('7-029', 128, upd));
+    P.push({ g: T(plane(w * 0.98, h * 0.98), 0, h / 2, d / 2 + 0.001), m: foilMat('mangaM', t) });
+    P.push({ g: T(plane(w * 0.98, h * 0.22), 0, h * 0.86, d / 2 + 0.0015), m: L(p, 'front') });
+    P.push({ g: T(plane(d, h), -w / 2 - 0.001, h / 2, 0, 0, -Math.PI / 2), m: C(p.color, { r: 0.5 }) });
+  },
+  // ボードゲーム：平たい箱（ふたに絵）
+  boardgame: (p, P) => {
+    const [w, h, d] = p.size;
+    P.push({ g: box(w, h, d), m: C(p.color, { r: 0.5 }) });
+    P.push({ g: T(plane(w * 0.96, d * 0.96), 0, h + 0.001, 0, -Math.PI / 2), m: L(p, 'front') });
+    P.push({ g: T(plane(w * 0.96, h * 0.9), 0, h / 2, d / 2 + 0.001), m: L(p, 'front') });
   },
   // レジのベルト・かごの中のシングルカード（スリーブに入ったカード）
   _card: (p, P) => {
@@ -149,7 +213,7 @@ export function productParts(pid) {
   const p = PRODUCTS[pid];
   let parts = [], baked;
   const fallback = (pp, P) => P.push({ g: box(...pp.size), m: C(pp.color) });
-  try { (B[pid] || fallback)(p, parts); baked = bakeParts(parts); }
+  try { (B[pid] || B[p.model] || fallback)(p, parts); baked = bakeParts(parts); }
   catch (e) { console.warn('商品モデル失敗', pid, e); parts = []; fallback(p, parts); baked = bakeParts(parts); }
   modelCache.set(pid, baked);
   return baked;

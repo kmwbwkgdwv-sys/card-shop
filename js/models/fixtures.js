@@ -75,7 +75,112 @@ function chalkboard(g, w, h, draw, frame = 0x8b5a2b) {
   for (let i = 0; i < 3; i++) add(g, T(box(0.06, 0.012, 0.012), -w * 0.3 + i * 0.08, 1.01), C(['#fff', '#ffd23f', '#ff8fab'][i]), 0, 0, -0.15);
 }
 const SIGNFACE = {};
+// パソコンの画面（仕入れアプリ）
+let pcScreenTex = null;
+function pcScreen() {
+  return pcScreenTex ||= canvasTex(512, 320, (c, W, H) => {
+    const g = c.createLinearGradient(0, 0, W, H); g.addColorStop(0, '#3b2a8a'); g.addColorStop(1, '#6b4ce0');
+    c.fillStyle = g; c.fillRect(0, 0, W, H);
+    c.fillStyle = 'rgba(255,255,255,0.92)'; rr(c, 18, 18, W - 36, H - 64, 14); c.fill();
+    c.fillStyle = '#5b3cc4'; c.font = `900 26px ${FONT}`; c.fillText('🛒 仕入れ', 34, 54);
+    const items = ['🎴', '🎁', '🃏', '🧸', '🧴', '🔑'];
+    items.forEach((e, i) => { const x = 34 + (i % 3) * 150, y = 76 + Math.floor(i / 3) * 84; c.fillStyle = '#efeaff'; rr(c, x, y, 136, 72, 10); c.fill(); emoji(c, e, x + 34, y + 36, 40); c.fillStyle = '#c7bdf5'; c.fillRect(x + 64, y + 22, 58, 9); c.fillRect(x + 64, y + 40, 40, 9); });
+    c.fillStyle = 'rgba(0,0,0,0.35)'; c.fillRect(0, H - 34, W, 34);
+    ['🛒', '🔑', '🧑‍💼', '💬', '🏪'].forEach((e, i) => emoji(c, e, 40 + i * 46, H - 17, 22));
+    c.fillStyle = '#fff'; c.font = `800 16px ${FONT}`; c.textAlign = 'right'; c.fillText('ANIMON SHOP OS', W - 16, H - 11);
+  });
+}
+// オートセント（自動消臭機）
+function scentUnit(g, lv) {
+  const white = C(0xf4f7f6, { r: 0.35, m: 0.2 }), green = C(0x36c08a, { r: 0.35 }), dark = DARK();
+  const h = lv === 1 ? 1.05 : lv === 2 ? 1.3 : 1.55, w = lv === 3 ? 0.34 : 0.26;
+  add(g, T(cyl(0.2, 0.23, 0.05, 20), 0, 0), dark);
+  add(g, T(cyl(0.03, 0.03, h - 0.35, 10), 0, 0.05), CHROME());
+  add(g, T(rbox(w, 0.36, w * 0.8, 0.04), 0, h - 0.36), white);
+  add(g, T(box(w * 0.86, 0.06, 0.01), 0, h - 0.3), green, 0, 0, w * 0.4 + 0.003);
+  for (let i = 0; i < lv; i++) add(g, T(cyl(0.02, 0.02, 0.05, 10), 0, 0, 0, Math.PI / 2), C(0x9aa3ad, { r: 0.3, m: 0.7 }), (i - (lv - 1) / 2) * 0.07, h - 0.12, w * 0.4 + 0.02);
+  add(g, T(sph(0.018, 8, 6), w * 0.32, h - 0.06, w * 0.38), C(0x7dffa6, { r: 0.3, e: 0x2bd46a }));
+  const lbl = M(T(plane(w * 0.84, 0.12), 0, h - 0.24), basic(signTexture(lv === 1 ? 'M100' : lv === 2 ? 'G500' : 'T1000', { w: 256, h: 64, bg: '#36c08a', fg: '#ffffff', radius: 10 })));
+  lbl.position.z = w * 0.4 + 0.004; g.add(lbl);
+}
 const BUILD = {
+  pc() {
+    // パソコンの机：モニター・キーボード・イス
+    const g = new THREE.Group(), wd = WOOD(), dark = DARK();
+    add(g, T(rbox(1.5, 0.05, 0.72, 0.01), 0, 0.74), wd);
+    for (const [x, z] of [[-0.7, 0.3], [0.7, 0.3], [-0.7, -0.3], [0.7, -0.3]]) add(g, box(0.05, 0.74, 0.05), dark, x, 0, z);
+    add(g, T(box(0.5, 0.6, 0.6), 0.45, 0.1), C(0x8a6a4a, { r: 0.6 }));
+    add(g, T(box(0.04, 0.22, 0.04), 0, 0.79), dark, 0, 0, -0.18);
+    add(g, T(box(0.22, 0.015, 0.16), 0, 0.79), dark, 0, 0, -0.18);
+    add(g, T(rbox(0.86, 0.52, 0.04, 0.012), 0, 0.98), C(0x1b1d24, { r: 0.4 }), 0, 0, -0.2);
+    const scr = M(T(plane(0.8, 0.46), 0, 1.01 + 0.23), basic(pcScreen())); scr.position.z = -0.177; g.add(scr);
+    add(g, T(rbox(0.46, 0.02, 0.16, 0.006), 0, 0.79), C(0xe9ebf0, { r: 0.4 }), -0.05, 0, 0.06);
+    add(g, T(rbox(0.07, 0.025, 0.1, 0.02), 0, 0.79), C(0xe9ebf0, { r: 0.4 }), 0.3, 0, 0.08);
+    // イス
+    const ch = new THREE.Group();
+    add(ch, T(cyl(0.24, 0.24, 0.06, 18), 0, 0.46), C(0x2b2d42, { r: 0.6 }));
+    add(ch, T(cyl(0.03, 0.03, 0.4, 8), 0, 0.06), CHROME());
+    add(ch, T(rbox(0.42, 0.42, 0.05, 0.02), 0, 0.54), C(0x2b2d42, { r: 0.6 }), 0, 0, 0.22);
+    for (let i = 0; i < 5; i++) { const a = i / 5 * Math.PI * 2; add(ch, T(box(0.03, 0.03, 0.26), 0, 0.03), dark, Math.sin(a) * 0.12, 0, Math.cos(a) * 0.12, a); }
+    ch.position.set(0, 0, 0.62); g.add(ch);
+    return g;
+  },
+  scent1(f) { const g = new THREE.Group(); scentUnit(g, 1); return g; },
+  scent2(f) { const g = new THREE.Group(); scentUnit(g, 2); return g; },
+  scent3(f) { const g = new THREE.Group(); scentUnit(g, 3); return g; },
+  // シングルカード棚：3段のひな壇にカードを立てる
+  cardshelf(f, ctx) {
+    const g = new THREE.Group(), wd = WOOD(), dark = C(0x3b2a20, { r: 0.55 });
+    for (const x of [-0.485, 0.485]) add(g, box(0.03, 1.42, 0.48), wd, x);
+    add(g, T(box(0.97, 1.42, 0.02), 0, 0), wd, 0, 0, -0.23);
+    add(g, box(0.97, 0.6, 0.46), dark);
+    for (const [y, z] of [[0.6, 0.12], [0.86, 0.02], [1.12, -0.08]]) {
+      add(g, T(box(0.94, 0.04, 0.18), 0, y), wd, 0, 0, z);
+      add(g, T(box(0.94, 0.025, 0.01), 0, y + 0.04), PAINT(ctx.color), 0, 0, z + 0.09);
+    }
+    add(g, T(box(1.0, 0.04, 0.5), 0, 1.42), wd);
+    standRow(g, FIXTURES.cardshelf);
+    headSign(g, 'SINGLES', '🃏', ctx.color, 1.46, 1.62, -0.2, 0.9);
+    return g;
+  },
+  smalldisp(f, ctx) {
+    const g = new THREE.Group(), body = C(0x2a2f3a, { r: 0.45 });
+    add(g, rbox(1, 0.82, 0.6, 0.015), body);
+    add(g, T(box(0.96, 0.1, 0.012), 0, 0.62), PAINT(ctx.color), 0, 0, 0.301);
+    add(g, T(box(0.94, 0.04, 0.54), 0, 0.82), C(0x1b1d2a, { r: 0.95 }));
+    add(g, T(box(0.94, 0.05, 0.16), 0, 0.85), C(0x23263a, { r: 0.95 }), 0, 0, -0.06);
+    standRow(g, FIXTURES.smalldisp);
+    add(g, T(box(1, 0.012, 0.6), 0, 1.02), glassMat());
+    for (const z of [-0.296, 0.296]) add(g, T(box(1, 0.18, 0.008), 0, 0.84), glassMat(), 0, 0, z);
+    for (const x of [-0.496, 0.496]) add(g, T(box(0.008, 0.18, 0.6), x, 0.84, 0), glassMat());
+    for (const z of [-0.296, 0.296]) add(g, T(box(1.01, 0.015, 0.015), 0, 1.02), CHROME(), 0, 0, z);
+    return g;
+  },
+  cardtower(f, ctx) {
+    const g = new THREE.Group(), body = C(0x1f2128, { r: 0.4, m: 0.3 }), gold = C(0xc9a227, { r: 0.3, m: 0.75 });
+    add(g, box(1, 0.36, 0.6), body);
+    add(g, T(box(1, 0.1, 0.6), 0, 1.84), body);
+    add(g, T(plane(0.94, 1.48), 0, 0.36 + 0.74, -0.28), new THREE.MeshBasicMaterial({ color: 0xeef3ff, toneMapped: false }));
+    for (const y of [0.42, 0.78, 1.14, 1.5]) add(g, T(box(0.94, 0.012, 0.5), 0, y), glassMat());
+    for (const x of [-0.49, 0.49]) add(g, T(box(0.02, 1.48, 0.6), x, 0.36, 0), glassMat());
+    add(g, T(box(0.98, 1.48, 0.01), 0, 0.36, 0.295), glassMat());
+    for (const x of [-0.49, 0.49]) add(g, T(box(0.03, 1.48, 0.03), x, 0.36, 0.285), gold);
+    add(g, T(box(1.02, 0.03, 0.62), 0, 1.83), gold);
+    add(g, T(plane(0.8, 0.08), 0, 1.89), basic(signTexture('RARE CARDS', { w: 512, h: 72, bg: '#1b1d24', fg: '#ffd84a', emojiL: '💎', radius: 10 })), 0, 0, 0.302);
+    void ctx;
+    return g;
+  },
+  walldisp2(f, ctx) {
+    const g = new THREE.Group(), gold = C(0xc9a227, { r: 0.3, m: 0.75 });
+    for (const x of [-0.62, 0.62]) { add(g, box(0.04, 1.66, 0.04), DARK(), x, 0, -0.1); add(g, box(0.06, 0.03, 0.3), DARK(), x, 0, 0); }
+    add(g, T(box(1.28, 0.62, 0.03), 0, 1.0, -0.1), C(0x1b1d2a, { r: 0.95 }));
+    for (const y of [1.0, 1.62]) add(g, T(box(1.32, 0.03, 0.2), 0, y - 0.015, 0), gold);
+    for (const x of [-0.65, 0.65]) add(g, T(box(0.03, 0.65, 0.2), x, 0.985, 0), gold);
+    add(g, T(box(1.28, 0.6, 0.008), 0, 1.01, 0.095), glassMat());
+    add(g, T(plane(0.5, 0.06), 0, 0.97), basic(signTexture('SHOWCASE', { w: 512, h: 76, bg: '#c9a227', fg: '#2b1d00', radius: 10 })), 0, 0, 0.1);
+    void ctx;
+    return g;
+  },
   mboard() {
     const g = new THREE.Group();
     chalkboard(g, 1.8, 1.0, (c, W, H) => {

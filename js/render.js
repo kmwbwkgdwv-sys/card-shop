@@ -585,12 +585,92 @@ export class Renderer {
       if (e.bubble !== undefined) ch.setBubble(e.bubble || null, e.bubbleText);
       ch.root.visible = e.visible !== false;
       ch.update(dt);
+      if (e.kind === 'cust') this._stink(ch, e.smell || 0);
       if (e.kind === 'cust' && ch.root.visible && (e.items || e.hold)) this._custGoods(ch, e);
     }
     this.custItems.end();
     for (const [k, v] of this.chars) if (!seen.has(k)) { v.ch.dispose(); this.chars.delete(k); }
   }
   getChar(key) { return this.chars.get(key)?.ch; }
+  // 臭いお客さん：緑のもやもやが体のまわりから立ちのぼる
+  _stink(ch, sm) {
+    if (!sm) { if (ch.stink) ch.stink.visible = false; return; }
+    if (!ch.stink) {
+      const g = new THREE.Group(), map = stinkTex();
+      for (let i = 0; i < 7; i++) { const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map, transparent: true, depthWrite: false, opacity: 0.5 })); sp.userData.ph = i / 7; sp.renderOrder = 5; g.add(sp); }
+      ch.root.add(g); ch.stink = g;
+    }
+    const g = ch.stink, t = this.t || 0, k = Math.min(1, sm / 10);
+    g.visible = true;
+    for (const sp of g.children) {
+      const ph = (sp.userData.ph + t * 0.22) % 1, a = sp.userData.ph * Math.PI * 2 + t * 0.7;
+      sp.position.set(Math.cos(a) * 0.3, 0.35 + ph * 1.6, Math.sin(a) * 0.3);
+      const sc = (0.38 + ph * 0.5) * (0.55 + 0.45 * k);
+      sp.scale.set(sc, sc, 1);
+      sp.material.opacity = Math.sin(ph * Math.PI) * 0.6 * (0.35 + 0.65 * k);
+    }
+  }
+  // 消臭スプレーのしぶき
+  sprayFx(x, y, z, tx, tz) {
+    this._spr ||= []; this._sprPool ||= [];
+    const map = mistTex(), dx = tx - x, dz = tz - z, d = Math.hypot(dx, dz) || 1, nx = dx / d, nz = dz / d;
+    for (let i = 0; i < 18; i++) {
+      let sp = this._sprPool.pop();
+      if (!sp) { sp = new THREE.Sprite(new THREE.SpriteMaterial({ map, transparent: true, depthWrite: false })); sp.renderOrder = 7; }
+      const sp0 = 1.3 + Math.random() * 1.8;
+      sp.position.set(x + nx * 0.4, y + (Math.random() - 0.5) * 0.08, z + nz * 0.4);
+      sp.userData = { vx: nx * sp0 + (Math.random() - 0.5) * 0.7, vy: (Math.random() - 0.35) * 0.5, vz: nz * sp0 + (Math.random() - 0.5) * 0.7, life: 0, max: 0.55 + Math.random() * 0.5 };
+      sp.scale.setScalar(0.1); sp.material.opacity = 0.75;
+      this.scene.add(sp); this._spr.push(sp);
+    }
+  }
+  _updateSpray(dt) {
+    if (!this._spr?.length) return;
+    for (let i = this._spr.length - 1; i >= 0; i--) {
+      const sp = this._spr[i], u = sp.userData;
+      u.life += dt;
+      sp.position.x += u.vx * dt; sp.position.y += u.vy * dt; sp.position.z += u.vz * dt;
+      const f = Math.pow(0.12, dt); u.vx *= f; u.vz *= f; u.vy *= f;
+      sp.scale.setScalar(0.1 + u.life * 1.1);
+      sp.material.opacity = 0.75 * Math.max(0, 1 - u.life / u.max);
+      if (u.life >= u.max) { this.scene.remove(sp); this._spr.splice(i, 1); this._sprPool.push(sp); }
+    }
+  }
+  // 手に持っている物（パック最大5・BOX・消臭スプレー）。一人称はカメラの前、ほかの人は右手に
+  syncHands(list, fp) {
+    this.handItems ||= new Instancer(this.prodRoot, (pid) => productParts(pid));
+    this.handItems.begin();
+    const itemsOf = (hd) => (hd.t === 'packs' ? hd.a.slice(-5) : [hd.p]);
+    if (fp?.hand) {
+      const hd = fp.hand, arr = itemsOf(hd), n = arr.length, bob = fp.bob || 0;
+      this.camera.updateMatrixWorld();
+      arr.forEach((pid, i) => {
+        const k = i - (n - 1) / 2;
+        let o = [0.13 + k * 0.034, -0.25 + bob - Math.abs(k) * 0.006, -0.42 - i * 0.002], r = [0.22, -0.12, -k * 0.13];
+        if (hd.t === 'box') { o = [0.1, -0.28 + bob, -0.46]; r = [0.35, -0.35, 0]; }
+        if (hd.t === 'spray') { o = [0.19, -0.32 + bob, -0.44]; r = [0.15, 0.1, 0]; }
+        _m2.compose(_v.set(...o), _q.setFromEuler(_e.set(...r)), _s);
+        this.handItems.push(pid, _m3.multiplyMatrices(this.camera.matrixWorld, _m2), null);
+      });
+      const w = hd.t === 'packs' ? 0.07 + (n - 1) * 0.034 : hd.t === 'box' ? 0.15 : 0.06;
+      this._fpRig(fp.av, [w, 0.1, 0.02]);
+      const cx = hd.t === 'packs' ? 0.13 : hd.t === 'box' ? 0.1 : 0.19;
+      this.fpHands.position.set(cx, (hd.t === 'spray' ? -0.3 : -0.27) + bob, hd.t === 'box' ? -0.44 : -0.41); this.fpHands.rotation.set(0.12, 0, 0);
+    }
+    for (const e of list) {
+      if (!e.hand || e.kind !== 'player') continue;
+      const ch = this.getChar(e.key);
+      if (!ch || !ch.root.visible || !ch.armR) continue;
+      ch.root.updateMatrixWorld(true);
+      const arr = itemsOf(e.hand), n = arr.length;
+      arr.forEach((pid, i) => {
+        const k = i - (n - 1) / 2;
+        _m2.compose(_v.set(k * 0.03, -0.38, 0.07), _q.setFromEuler(_e.set(0, 0, k * 0.15)), _s);
+        this.handItems.push(pid, _m3.multiplyMatrices(ch.armR.matrixWorld, _m2), null);
+      });
+    }
+    this.handItems.end();
+  }
   // かごに入れた商品（最大8個）と、いま手に取った商品を描く
   _custGoods(ch, e) {
     ch.root.updateMatrixWorld(true);
@@ -742,7 +822,7 @@ export class Renderer {
     this.blobs.begin();
     const put = (k, x, z, sx, sz, ry = 0, y = 0.012) => { _m.compose(_v.set(x, y, z), _q.setFromAxisAngle(UP, ry), _s.set(sx, 1, sz)); this.blobs.push(k, _m, null); _s.set(1, 1, 1); };
     for (const f of store.fixtures) {
-      const d = FIXTURES[f.t]; if (!d || ['mboard', 'fboard', 'xboard', 'banner', 'neon', 'signstand', 'hangsign', 'walldisp'].includes(f.t)) continue;
+      const d = FIXTURES[f.t]; if (!d || ['fboard', 'xboard', 'banner', 'neon', 'signstand', 'hangsign', 'walldisp', 'walldisp2'].includes(f.t)) continue;
       const big = f.t === 'checkout' || d.d >= 1;
       put('r', f.x, f.z, d.w * 1.35 + 0.3, d.d * 1.35 + (big ? 0.3 : 0.45), f.r * Math.PI / 2);
     }
@@ -752,6 +832,7 @@ export class Renderer {
   }
   update(dt) {
     this.t += dt;
+    this._updateSpray(dt);
     const bt = getBeltTex(); bt.offset.y = (bt.offset.y + dt * 0.25) % 1;
   }
   render() {
@@ -794,3 +875,21 @@ export function avatarPreview(renderer) {
   return { scene, cam };
 }
 export { Character, randomAvatar };
+
+// 緑のもやもや（臭い）と、白い霧（スプレー）
+let _stinkTex = null, _mistTex = null;
+function stinkTex() {
+  return _stinkTex ||= canvasTex(128, 128, (c, w, h) => {
+    for (let i = 0; i < 5; i++) {
+      const x = w / 2 + Math.cos(i * 1.3) * 18, y = h / 2 + Math.sin(i * 1.9) * 14, r = 34 + (i % 3) * 8;
+      const g = c.createRadialGradient(x, y, 2, x, y, r); g.addColorStop(0, 'rgba(150,215,60,0.75)'); g.addColorStop(0.6, 'rgba(110,170,40,0.35)'); g.addColorStop(1, 'rgba(90,140,30,0)');
+      c.fillStyle = g; c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill();
+    }
+  });
+}
+function mistTex() {
+  return _mistTex ||= canvasTex(64, 64, (c, w, h) => {
+    const g = c.createRadialGradient(w / 2, h / 2, 1, w / 2, h / 2, w / 2); g.addColorStop(0, 'rgba(255,255,255,0.95)'); g.addColorStop(0.5, 'rgba(210,245,255,0.5)'); g.addColorStop(1, 'rgba(200,240,255,0)');
+    c.fillStyle = g; c.fillRect(0, 0, w, h);
+  });
+}

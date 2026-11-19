@@ -13,6 +13,9 @@ export function revAt(lv) {
 }
 // ライセンス料・雇用ライセンスの丸め（見やすい数字に）
 export function niceYen(v) { const u = v >= 1e6 ? 50000 : v >= 1e5 ? 10000 : v >= 1e4 ? 1000 : 500; return Math.max(500, Math.round(v / u) * u); }
+// レベルが上がりにくくなってお金が貯まりやすくなったぶん、ライセンス・設備・従業員ライセンスを少し値上げ（Lv.2 で1.2倍 → Lv.50 で1.8倍。Lv.1 はそのまま）
+export const priceUp = (lv) => ((lv || 1) <= 1 ? 1 : 1.2 + 0.6 * Math.min(1, ((lv || 1) - 2) / 48));
+const upYen = (v, lv) => { const x = v * priceUp(lv); return x < 10000 ? Math.round(x / 100) * 100 : niceYen(x); };
 // ---------- 店舗レイアウト（原作風：5m区画を少しずつ買い足して広げる） ----------
 export const BAY = 5;
 export const SALES = { x0: -35, z0: 6, cols: 8, rows: 4 }; // 売り場区画 b{列}{行}  列0=左はし・列7=右はし（入口のある所）、行0=通り側（最大 40m×20m・32区画）
@@ -87,10 +90,10 @@ export function expandTargets(store) {
   return out;
 }
 export function expandCost(store, id) {
-  // 売り場：買うたびに約1.22倍（だいたい2レベルに1区画のペースで、その時の売上の2〜7割くらい）
-  if (id.startsWith('b')) { const n = Math.max(0, Object.keys(store.bays || {}).length - START_BAYS.length); return niceYen(15000 * Math.pow(1.22, n)); }
-  // 倉庫：1つめ ¥80,000、2つめ ¥400,000
-  const n = Math.max(0, Object.keys(store.stock || {}).length - START_STOCK.length); return [80000, 400000][n] ?? niceYen(400000 * Math.pow(5, n - 1));
+  // 売り場：1区画め ¥20,000 から、買うたびに約1.22倍
+  if (id.startsWith('b')) { const n = Math.max(0, Object.keys(store.bays || {}).length - START_BAYS.length); return niceYen(20000 * Math.pow(1.22, n)); }
+  // 倉庫：1つめ ¥100,000、2つめ ¥500,000
+  const n = Math.max(0, Object.keys(store.stock || {}).length - START_STOCK.length); return [100000, 500000][n] ?? niceYen(500000 * Math.pow(5, n - 1));
 }
 // 倉庫の出入口が開いているか（倉庫と、出入口の前の売り場の両方を使っているとき）
 export const doorOpen = (store, s) => !!(s.door && store?.stock?.[s.id] && store?.bays?.[bayAt(STRIP.x0 - 1, (s.door[0] + s.door[1]) / 2)]);
@@ -229,11 +232,11 @@ const GOODS = [
 export const PRODUCTS_LIST = [
   // バラパック（1パック5枚入り）と BOX（10パック入り）
   ...SERIES.map((s) => P({ id: 'pk' + s.id, name: `${s.name} パック`, short: s.name, cat: 'pack', series: s.id, cost: Math.round(s.price * 0.68), price: s.price, qty: PACK_QTY,
-    size: [0.074, 0.122, 0.012], icon: '🎴', color: s.color, lv: s.lv, lic: s.id === 1 ? 0 : niceYen(revAt(s.lv) * 0.25) })),
+    size: [0.074, 0.122, 0.012], icon: '🎴', color: s.color, lv: s.lv, lic: s.id === 1 ? 0 : niceYen(revAt(s.lv) * 0.25 * priceUp(s.lv)) })),
   ...SERIES.map((s) => P({ id: 'bx' + s.id, name: `${s.name} BOX`, short: s.name, cat: 'box', series: s.id, cost: Math.round(s.price * 10 * BOX_PREMIUM * 0.7), price: Math.round(s.price * 10 * BOX_PREMIUM), qty: BOXES_PER_CARTON,
-    size: [0.15, 0.09, 0.056], stack: 3, icon: '🎁', color: s.color, lv: Math.max(2, s.boxLv), bx: 'l', lic: niceYen(revAt(Math.max(2, s.boxLv)) * 0.35) })),
+    size: [0.15, 0.09, 0.056], stack: 3, icon: '🎁', color: s.color, lv: Math.max(2, s.boxLv), bx: 'l', lic: niceYen(revAt(Math.max(2, s.boxLv)) * 0.35 * priceUp(Math.max(2, s.boxLv))) })),
   ...GOODS.map(([id, name, cat, cost, price, qty, size, icon, color, lv, model, brand, net, extra]) => P({ id, name, cat, cost, price, qty, size, icon, color, lv, model, brand, net, ...(extra || {}),
-    lic: lv <= 1 ? 0 : niceYen(revAt(lv) * 0.12), ...(extra || {}) })),
+    lic: lv <= 1 ? 0 : niceYen(revAt(lv) * 0.12 * priceUp(lv)), ...(extra || {}) })),
 ];
 export const SPRAY_ID = 'spray';
 export const SPRAY_USES = 3; // 1本で臭いお客さん3人くらい
@@ -351,7 +354,7 @@ export const FIXTURES = {
   neon: F({ name: 'ネオン看板', cat: 'sign', icon: '💡', price: 4500, w: 1, d: 0.5, place: 'any', lv: 9, text: true, desc: '光る文字の看板' }),
 };
 export const FIXTURE_CATS = { shelf: '陳列棚', cardsale: 'カード販売', play: '対戦', checkout: 'レジ', storage: '倉庫', clean: '消臭', deco: '装飾', sign: '看板' };
-for (const [id, f] of Object.entries(FIXTURES)) { f.id = id; (f.slots || []).forEach((s, i) => (s.key = id + i)); }
+for (const [id, f] of Object.entries(FIXTURES)) { f.id = id; (f.slots || []).forEach((s, i) => (s.key = id + i)); if (f.price && !f.fixed) f.price = upYen(f.price, f.lv); }
 
 export function fixtureFootprint(fx, x, z, r) {
   const def = FIXTURES[fx];
@@ -531,6 +534,7 @@ export const STAFF_SLOTS = [
   { no: 9, lv: 43, reg: 3, stk: 5, lic: 550000, wage: 45000 },
   { no: 10, lv: 50, reg: 5, stk: 5, lic: 800000, wage: 60000 },
 ];
+for (const sl of STAFF_SLOTS) sl.lic = upYen(sl.lic, sl.lv);
 export const hasStaffLicense = (store, no) => !!store?.slic?.[no];
 export const STAFF_MAX = STAFF_SLOTS.length;
 export const staffSlotOpen = (level, no) => (level || 1) >= (STAFF_SLOTS[no - 1]?.lv ?? 999);

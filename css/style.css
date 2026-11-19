@@ -760,3 +760,14 @@ div.pstock { display: flex; align-items: baseline; gap: 4px; min-width: 0; max-w
 }
 .bo-btns .btn { flex: 0 1 auto; }
 .scard.nolic { background: #fffbea; outline: 2px dashed #f5b800; }
+/* レジ：お客さんが買う商品の一覧 */
+.reg-items { display: flex; flex-direction: column; gap: 3px; max-height: 34vh; overflow-y: auto; }
+.reg-items.small { max-height: 18vh; }
+.reg-item { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto 20px; align-items: center; gap: 6px; background: #f6f3ff; border-radius: 9px; padding: 3px 6px; font-size: 12px; font-weight: 800; cursor: pointer; }
+.reg-item.done { background: #eafaf1; color: #0f7a5a; cursor: default; }
+.reg-item .ri-n { white-space: normal; line-height: 1.2; }
+.reg-item .pthumb { width: 22px; height: auto; } .reg-item .pthumb.box { width: 30px; }
+.reg-item .pe.tile { width: 26px; height: 26px; font-size: 15px; border-radius: 7px; }
+.reg-item .tcard { --w: 24px; }
+.reg-item .ri-e { font-size: 18px; text-align: center; }
+@media (max-height: 520px) { .reg-items { max-height: 28vh; } .reg-items.small { max-height: 14vh; } .reg-item { font-size: 11px; padding: 2px 5px; } }

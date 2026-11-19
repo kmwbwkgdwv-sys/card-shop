@@ -196,7 +196,7 @@ export class GameUI {
         const tagged = st.fixtures.reduce((n, f) => n + (f.s ? f.s.filter((x) => x[0]).length : 0), 0);
         const labels = st.fixtures.reduce((n, f) => n + (f.lb ? f.lb.filter(Boolean).length : 0), 0);
         body.append(h('div', { class: 'wage-total' }, `💴 人件費 1日 ${yen(wages)}`, h('span', { class: 'muted small' }, `（${st.staff.length}人・閉店のときに払います）`)),
-          h('p', { class: 'muted small' }, `雇える人 ${staffLimit(st.level)} / ${STAFF_MAX}人（お店 Lv.5 から1人ずつ増える。雇うには先に🔑雇用ライセンスが必要）。だれでも🧾レジと📦品出しの両方ができますが、人によってそれぞれのはやさがちがいます（レジが得意で品出しが遅い人、その逆の人、両方同じ人）。「🔄両方」にすると、お客さんがレジに並んだらレジへ、空いている時間は品出しをします。品出しは値札のついた棚（いま${tagged}か所）に補充し、届いた段ボールはラベルの貼ってある倉庫棚の段（いま${labels}段）にしまいます。`));
+          h('p', { class: 'muted small' }, `雇える人 ${staffLimit(st.level)} / ${STAFF_MAX}人（お店 Lv.5 から1人ずつ増える。雇うには先に🔑雇用ライセンスが必要）。だれでも🧾レジと📦品出しの両方ができますが、人によってそれぞれのはやさがちがいます（レジが得意で品出しが遅い人、その逆の人、両方同じ人）。「🔄両方」にすると、お客さんがレジに並んだらレジへ、空いている時間は品出しをします。「🏷️値段係」にすると、相場が変わるたびに棚とシングルカードの値段を「ギリギリ売れる値段」（相場の+20%）に直してくれます。品出しは値札のついた棚（いま${tagged}か所）に補充し、届いた段ボールはラベルの貼ってある倉庫棚の段（いま${labels}段）にしまいます。`));
         const bar = (spd) => h('span', { class: 'spdbar' }, h('i', { style: { width: Math.round(SPEEDS[spd].k / 2 * 100) + '%' } }));
         const skills = (reg, stk) => h('div', { class: 'skills' },
           h('div', { class: 'sk' + (reg > stk ? ' fav' : '') }, h('span', {}, '🧾 レジ'), bar(reg), h('b', {}, `${SPEEDS[reg].icon}${SPEEDS[reg].name}`)),
@@ -215,7 +215,7 @@ export class GameUI {
                 h('span', { class: 'muted small' }, `日給 ${yen(s.wage)}`),
                 h('button', { class: 'btn small ghost', onclick: async () => { if (await confirmBox(`${s.name}さんを解雇しますか？（もう一度雇うこともできます）`, '解雇')) { g.act({ t: 'fire', sid: s.id }); setTimeout(draw, 150); } } }, '解雇')),
               h('div', { class: 'roles' }, Object.entries(STAFF_ROLES).map(([k, d]) => h('button', { class: 'role' + (s.role === k ? ' on' : ''), onclick: () => { g.act({ t: 'staffRole', sid: s.id, role: k }); setTimeout(draw, 150); } },
-                `${d.icon} ${k === 'both' ? '両方' : d.name}${k === 'cashier' ? `（${SPEEDS[s.reg].name}）` : k === 'stocker' ? `（${SPEEDS[s.stk].name}）` : ''}`))),
+                `${d.icon} ${k === 'both' ? '両方' : d.name}${k === 'cashier' ? `（${SPEEDS[s.reg].name}）` : k === 'stocker' || k === 'pricer' ? `（${SPEEDS[s.stk].name}）` : ''}`))),
               h('div', { class: 'muted small' }, R.desc)));
           } else if (open && !hasStaffLicense(st, sl.no)) {
             body.append(h('div', { class: 'scard nolic' }, head, skills(sl.reg, sl.stk),
@@ -688,8 +688,16 @@ export class GameUI {
       h('button', { class: 'btn small ghost', onclick: () => g.leaveRegister() }, '離れる')));
     if (r.ph === 'idle') { R.append(h('div', { class: 'reg-msg' }, 'お客さんを待っています…')); this._change = 0; return; }
     R.append(h('div', { class: 'reg-total' }, h('span', {}, `${scanned}/${r.b.length}点`), h('b', {}, yen(sum))));
+    // お客さんが買う商品の一覧（タップでもスキャンできる）
+    R.append(h('div', { class: 'reg-items' + (r.ph === 'pay' ? ' small' : '') }, r.b.map(([p, sc, price, cid], i) => {
+      const prod = PRODUCTS[p], c = cid && CARDS[cid];
+      const name = p === '_card' && c ? `${c.flash ? '✨' : ''}${c.name}（${c.r}）` : p === '_play' ? '🎮 プレイ料金' : prod?.name || p;
+      const thumb = p === '_card' && c ? cardEl(cid, { size: 24 }) : prod && !prod.hidden ? prodThumb(prod, true) : h('span', { class: 'ri-e' }, prod?.icon || '❔');
+      return h('div', { class: 'reg-item' + (sc ? ' done' : ''), onclick: sc || r.ph !== 'scan' ? null : () => g.act({ t: 'scan', fid, i }) },
+        thumb, h('span', { class: 'ri-n' }, name), h('b', {}, yen(price)), h('span', { class: 'ri-s' }, sc ? '✅' : '📡'));
+    })));
     if (r.ph === 'scan') {
-      R.append(h('div', { class: 'reg-msg' }, 'ベルトの商品をタップしてスキャン！'), h('button', { class: 'btn big', onclick: () => g.scanNext() }, '📡 次をスキャン'));
+      R.append(h('div', { class: 'reg-msg' }, 'ベルトの商品（または上の一覧）をタップしてスキャン！'), h('button', { class: 'btn big', onclick: () => g.scanNext() }, '📡 次をスキャン'));
       this._change = 0;
     } else if (r.ph === 'pay') {
       const p = r.pay;

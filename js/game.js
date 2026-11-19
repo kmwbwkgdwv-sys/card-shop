@@ -642,6 +642,7 @@ export class Game {
     if (this.state !== 'reg') return;
     this.act({ t: 'regLeave' });
     this.state = 'walk'; this.regFid = null; this.input.pointerFree = false; this.input.overlay.classList.remove('regmode');
+    this.R.setViewShift(0);
     this.ui.updateReg(null);
     const p = this.pc; p.yaw = p.ry;
     if (!silent) this.app.sfx.play('click');
@@ -656,12 +657,15 @@ export class Game {
     const r = this.dyn?.r?.[this.regFid];
     if (r && r.op && r.op !== this.me && !String(r.op).startsWith('s:')) { toast('他の人がレジを担当しています', 'warn'); return this.leaveRegister(true); }
     const cam = this.R.camera;
-    const [ox, oz] = checkoutSpot(f, -1);
-    const [bx, bz] = localToWorld(f, 0.05, 0.35);
-    const back = 0.75;
-    const dx = ox - bx, dz = oz - bz, d = Math.hypot(dx, dz);
-    cam.position.set(ox + dx / d * back * 0.3, 1.95, oz + dz / d * back * 0.3);
-    cam.lookAt(bx, 0.85, bz);
+    // レジ係の目の高さから、カウンターの向こうを見る：手前にベルトの商品、正面にお客さんの顔
+    const [ex, ez] = localToWorld(f, -1.05, -0.4);
+    const [tx, tz] = localToWorld(f, 0.45, 0.2);
+    cam.position.set(ex, 1.58, ez);
+    cam.lookAt(tx, 1.02, tz);
+    // 左のレジパネルに隠れないよう、見える所の真ん中に寄せる
+    const pr = this.ui.reg && !this.ui.reg.classList.contains('hidden') ? this.ui.reg.getBoundingClientRect() : null;
+    const wide = window.innerWidth > window.innerHeight;
+    this.R.setViewShift(pr && wide && pr.left < window.innerWidth / 2 ? Math.min(pr.right, window.innerWidth * 0.5) / 2 : 0);
     this.ui.showCross(false);
     this.ui.setKeys(this.input.touchVisible ? '' : '商品をクリック or E：スキャン　Q/Esc：レジを離れる');
     for (const tap of inp.taps) {
@@ -787,7 +791,7 @@ export class Game {
     const myAn = this.state === 'reg' ? 'scan' : this.reachT > 0 ? 'reach' : null;
     const hands = st.hand || {};
     list.push({ key: 'me', kind: 'player', av: this.app.profile.av, x: p.x, y: p.y, z: p.z, ry: p.ry, local: true, an: myAn, carry: heldBy.has(this.me), hand: hands[this.me] || null,
-      name: s.names && this.room ? this.app.profile.name : null, nameColor: '#ffe14d', visible: s.cam !== 'first' || this.state === 'reg',
+      name: s.names && this.room ? this.app.profile.name : null, nameColor: '#ffe14d', visible: s.cam !== 'first' && this.state !== 'reg', // レジの画面では自分の体でお客さんや商品が隠れないように
       bubble: this.chat[this.me] ? 'chat' : null, bubbleText: this.chat[this.me]?.text });
     for (const [uid, pl] of Object.entries(this.players)) {
       if (pl.x == null) continue;
@@ -833,6 +837,7 @@ export class Game {
       ['🎮', 'プレイテーブルを置くと、お客さんが対戦してレジでプレイ料金を払ってくれる（料金はパソコンの「お店」で変更）'],
       ['🏷️', '倉庫棚の段には「ラベル」を貼れる。品出しは、ラベルの貼ってある段にだけその商品を置く（ラベルがないと外の段ボールを片付けない）'],
       ['🧑‍💼', '従業員はだれでもレジと品出しの両方ができるが、人によって得意さ（とても遅い〜とても早い）がちがう。「🔄両方」にすると、レジに並んだらレジへ、空いたら品出し。Lv.5から、🔑雇用ライセンスを買って雇える（最大10人）'],
+      ['🏷️', '従業員を「値段係」にすると、相場が変わるたびに棚を回って、商品とシングルカードの値段を「ギリギリ売れる値段」（相場の+20%）に直してくれる'],
       ['🪧', '入口の看板を「OPEN」にすると営業スタート。レジに入って商品をタップ→スキャン、おつりを渡す'],
       ['⭐', 'お店のレベルは最大50。レベルが上がると新しいライセンス・棚・従業員・レジの台数が増える（スキルボードはありません）'],
       ['📈', '商品にもカードにも毎日変わる相場がある。カード相場ボード（パソコン室）や📒コレクションファイルで確認しよう'],
@@ -845,6 +850,7 @@ export class Game {
     this.ui.opened(md);
   }
   stop() {
+    this.R.setViewShift?.(0);
     if (this.input.wheelOff) this.input.wheelOff();
     this.ui.closeAll(); this.ui.show(false);
     this.R.setHighlight(null); this.R.setGhost(null); this.R.setFixtureHidden(null);

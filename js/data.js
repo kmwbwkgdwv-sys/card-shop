@@ -236,7 +236,7 @@ export const PRODUCTS_LIST = [
     lic: lv <= 1 ? 0 : niceYen(revAt(lv) * 0.12), ...(extra || {}) })),
 ];
 export const SPRAY_ID = 'spray';
-export const SPRAY_USES = 20; // 手で使うと1本で20回スプレーできる
+export const SPRAY_USES = 3; // 1本で臭いお客さん3人くらい
 // レジのベルトやお客さんのかごにだけ出る「商品」（シングルカード・プレイ料金）。発注はできない
 const PSEUDO = [
   { id: '_card', name: 'シングルカード', cat: '', place: [], cost: 0, price: 0, qty: 1, max: 1, size: [0.07, 0.1, 0.004], icon: '🃏', color: '#4a6cf7', lv: 999, hidden: true },
@@ -326,11 +326,11 @@ export const FIXTURES = {
   // ---- 消臭（オートセント：消臭スプレーをセットすると、近くを通った臭いお客さんに自動でスプレー） ----
   // range：届く距離(m)　cd：スプレーの間隔(秒)　cans：セットできる本数　use：1回で使う量（1本＝1）　pot：消臭のつよさ（臭い10）
   scent1: F({ name: 'オートセント M100', cat: 'clean', icon: '🌬️', price: 5000, w: 0.5, d: 0.5, place: 'any', lv: 5,
-    scent: { range: 2.1, cd: 8, cans: 2, use: 0.05, pot: 5 }, desc: '自動消臭機。スプレー間隔8秒・2本セット・1回で臭いを半分消す' }),
+    scent: { range: 2.1, cd: 8, cans: 2, use: 0.17, pot: 5 }, desc: '自動消臭機。スプレー間隔8秒・2本セット・1回で臭いを半分消す（1本でお客さん3人くらい）' }),
   scent2: F({ name: 'オートセント G500', cat: 'clean', icon: '🌀', price: 15000, w: 0.5, d: 0.5, place: 'any', lv: 18,
-    scent: { range: 2.4, cd: 5, cans: 4, use: 0.1, pot: 10 }, desc: '自動消臭機。スプレー間隔5秒・4本セット・1回で臭いを消す' }),
+    scent: { range: 2.4, cd: 5, cans: 4, use: 0.34, pot: 10 }, desc: '自動消臭機。スプレー間隔5秒・4本セット・1回で臭いを消す（1本でお客さん3人くらい）' }),
   scent3: F({ name: 'オートセント T1000', cat: 'clean', icon: '💨', price: 40000, w: 0.5, d: 0.5, place: 'any', lv: 40,
-    scent: { range: 2.8, cd: 2.5, cans: 7, use: 0.1, pot: 10 }, desc: '自動消臭機。スプレー間隔2.5秒・7本セット・広い範囲' }),
+    scent: { range: 2.8, cd: 2.5, cans: 7, use: 0.34, pot: 10 }, desc: '自動消臭機。スプレー間隔2.5秒・7本セット・広い範囲（1本でお客さん3人くらい）' }),
   // ---- 固定の設備 ----
   pc: F({ name: 'パソコン', cat: 'fixed', icon: '💻', price: 0, w: 1.6, d: 0.8, place: 'any', fixed: true, desc: '仕入れ・ライセンス・従業員・お店の設定' }),
   fboard: F({ name: 'カード相場ボード', cat: 'fixed', icon: '📈', price: 0, w: 2, d: 0.5, place: 'any', fixed: true, desc: 'シングルカードの相場・コレクション' }),

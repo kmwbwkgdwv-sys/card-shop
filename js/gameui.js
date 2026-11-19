@@ -32,6 +32,9 @@ export class GameUI {
     this.reg = h('div', { class: 'reg-ui hidden' }); H.append(this.reg);
     this.build = h('div', { class: 'build-ui hidden' }); H.append(this.build);
     this.deliv = h('div', { class: 'hud-chip deliv hidden' }); H.append(this.deliv);
+    // 消臭スプレーのゲージ（手に持っているときだけ）
+    this.gaugeBar = h('i'); this.gaugeTxt = h('b');
+    this.gauge = h('div', { class: 'spray-gauge hidden' }, h('span', { class: 'sg-ic' }, '🧴'), h('div', { class: 'sg-bar' }, this.gaugeBar), this.gaugeTxt); H.append(this.gauge);
     this._hudT = 0; this.open = null;
   }
   show(v) { this.hud.classList.toggle('hidden', !v); }
@@ -67,6 +70,16 @@ export class GameUI {
     if (this.hint._t !== text) { this.hint.textContent = text || ''; this.hint._t = text; }
     this.info.classList.toggle('hidden', !info);
     if (info && this.info._t !== info) { this.info.innerHTML = info; this.info._t = info; }
+  }
+  setGauge(v) {
+    const on = v != null;
+    if (this.gauge._on !== on) { this.gauge.classList.toggle('hidden', !on); this.gauge._on = on; }
+    if (!on) return;
+    const pct = Math.max(0, Math.min(100, Math.round(v * 100)));
+    if (this.gauge._p === pct) return;
+    this.gauge._p = pct;
+    this.gaugeBar.style.width = pct + '%'; this.gaugeTxt.textContent = pct + '%';
+    this.gauge.classList.toggle('low', pct <= 25);
   }
   setKeys(text) { if (this.keys._t !== text) { this.keys.textContent = text; this.keys._t = text; } }
   showCross(v) { this.cross.classList.toggle('hidden', !v); }
@@ -242,7 +255,7 @@ export class GameUI {
         body.append(
           h('div', { class: 'pc-stats' }, stat('総売上', yen(st.totalSales)), stat('来店客数', st.totalCustomers + '人'), stat('評判', '⭐' + repStars(st.rep).toFixed(1)), stat('営業時間', `8:00〜${fmtTime(closeTime())}`),
             stat('開けたパック', (st.stats?.packs || 0) + '個'), stat('売れたシングル', (st.stats?.cardsSold || 0) + '枚'), stat('対戦したお客さん', (st.stats?.played || 0) + '人'), stat('レジの台数', `最大${checkoutLimit(st.level)}台`),
-            stat('消臭した回数', (st.stats?.sprayed || 0) + '回'), stat('ライセンス', `${PRODUCTS_LIST.filter((p) => hasLicense(st, p.id)).length}/${PRODUCTS_LIST.length}`)),
+            stat('消臭したお客さん', (st.stats?.sprayed || 0) + '人'), stat('ライセンス', `${PRODUCTS_LIST.filter((p) => hasLicense(st, p.id)).length}/${PRODUCTS_LIST.length}`)),
           h('div', { class: 'ed-label' }, '🎮 プレイテーブルの利用料（1回）'),
           h('div', { class: 'row' },
             h('button', { class: 'btn small ghost', onclick: () => { g.act({ t: 'playFee', v: fee - 50 }); setTimeout(draw, 150); } }, '−50'),

@@ -147,7 +147,9 @@ function deliverySpot(st, k) {
 
 // ---------- 手に持つ物（パック最大5・BOX1つ・消臭スプレー1本） ----------
 export const HAND_MAX = 5;
-const SPRAY_USES_HAND = 20; // 手で使うと1本で20回
+// 消臭スプレー（手で使う）：押しているあいだシューッと出る。1本で約6.5秒（臭いお客さん3人くらい）
+export const SPRAY_RATE = 0.15;  // 1秒で減るゲージ
+export const SPRAY_POWER = 5;    // 1秒で減る臭い（臭い10 → 2秒ほど吹きかけると消える）
 function handOk(hd) {
   if (hd.t === 'packs') return Array.isArray(hd.a) && hd.a.length > 0 && hd.a.every(isPack);
   if (hd.t === 'box') return isBoosterBox(hd.p);
@@ -729,24 +731,30 @@ export class Sim {
     this.ev({ t: 'boxopened', to: uid, s: sid, n: BOX_PACKS });
     this.sfx('boxopen'); this.bump();
   }
-  // 消臭スプレー：前に向かってシュッ（近くの臭いお客さんの臭いが減る）
+  // 消臭スプレー：押しているあいだ前に向かってシューッ（当たっている臭いお客さんの臭いがだんだん減る）
   a_spray(uid, a) {
     const hd = this.hand(uid);
     if (!hd || hd.t !== 'spray') return;
-    const x = +a.x, z = +a.z;
-    if (!isFinite(x) || !isFinite(z)) return;
-    const p = this.players[uid];
-    hd.u = Math.max(0, hd.u - 1 / SPRAY_USES_HAND);
-    for (const c of this.dyn.customers) if (c.sm > 0 && c.st !== 'out' && dist(c.x, c.z, x, z) < 1.4) this.deodorize(c, 5);
-    this.ev({ t: 'spray', x: p?.x ?? x, z: p?.z ?? z, tx: x, tz: z, y: 1.25, who: uid });
-    if (hd.u <= 0.001) { this.setHand(uid, null); this.toast(uid, '🧴 消臭スプレーが空になりました', 'info'); }
+    const x = +a.x, z = +a.z, dir = +a.a;
+    if (!isFinite(x) || !isFinite(z) || !isFinite(dir)) return;
+    const dur = clamp(+a.dur || 0.15, 0.03, 0.36);
+    hd.u = Math.max(0, +(hd.u - SPRAY_RATE * dur).toFixed(4));
+    // 前方2.3m・左右35°くらいの範囲にいる臭いお客さん
+    for (const c of this.dyn.customers) {
+      if (!(c.sm > 0) || c.st === 'out') continue;
+      const dx = c.x - x, dz = c.z - z, d = Math.hypot(dx, dz);
+      if (d > 2.3 || d < 0.01) continue;
+      let da = Math.atan2(dx, dz) - dir; da = Math.atan2(Math.sin(da), Math.cos(da));
+      if (Math.abs(da) < 0.62 || d < 0.6) { this.deodorize(c, SPRAY_POWER * dur); if (c.sm > 0 && c.bub !== 'stink') this.bubble(c, 'stink'); }
+    }
+    this.ev({ t: 'spray', x, z, tx: x + Math.sin(dir) * 1.6, tz: z + Math.cos(dir) * 1.6, y: 1.25, who: uid, n: 7 });
+    if (hd.u <= 0.001) { this.setHand(uid, null); this.toast(uid, '🧴 消臭スプレーが空になってなくなりました', 'info'); }
     this.bump();
   }
   deodorize(c, pot) {
     if (!(c.sm > 0)) return;
     c.sm = Math.max(0, c.sm - pot);
-    this.store.stats.sprayed = (this.store.stats.sprayed || 0) + 1;
-    if (c.sm <= 0.001) { c.sm = 0; c.cleaned = 1; this.store.today.cleaned = (this.store.today.cleaned || 0) + 1; this.bubble(c, 'fresh'); }
+    if (c.sm <= 0.001) { c.sm = 0; c.cleaned = 1; this.store.stats.sprayed = (this.store.stats.sprayed || 0) + 1; this.store.today.cleaned = (this.store.today.cleaned || 0) + 1; this.bubble(c, 'fresh'); }
     this.dynRev++;
   }
   // 手に持っている消臭スプレーを捨てる（ゴミ箱で）

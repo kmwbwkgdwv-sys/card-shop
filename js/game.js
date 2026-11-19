@@ -140,9 +140,14 @@ export class Game {
       }
       case 'boxopened': if (e.to === me) this.ui.showBoxOpened(e); break;
       case 'spray': {
-        this.R.sprayFx?.(e.x, e.y || 1.2, e.z, e.tx, e.tz);
-        const v = clamp(1.1 - dist(e.x, e.z, this.pc.x, this.pc.z) / 18, 0.1, 1);
-        this.app.sfx.play('spray', v);
+        this.R.sprayFx?.(e.x, e.y || 1.2, e.z, e.tx, e.tz, e.n);
+        // 長押しで何回も届くので、音は少し間をあける
+        const now = performance.now();
+        if (now - (this._sprSfx?.[e.who || e.fid] || 0) > 280) {
+          (this._sprSfx ||= {})[e.who || e.fid] = now;
+          const v = clamp(1.1 - dist(e.x, e.z, this.pc.x, this.pc.z) / 18, 0.1, 1);
+          this.app.sfx.play('spray', v);
+        }
         break;
       }
       case 'summary': this.ui.closeAll(); this.ui.showSummary(e.data, this.mode !== 'client'); this.leaveRegister(true); if (this.sim) this.app.saveGame(true); break;
@@ -328,10 +333,12 @@ export class Game {
   fx(id) { return this.store.fixtures.find((f) => f.id === id); }
   held() { return this.store.boxes.find((b) => b.loc.t === 'h' && b.loc.who === this.me); }
   hand() { return this.store?.hand?.[this.me] || null; }
-  // 消臭スプレー：向いている方向の少し先にシュッ
+  // 消臭スプレー：押しているあいだ、向いている方向にシューッ（前回からの時間ぶん出る）
   _spray() {
-    const p = this.pc, a = p.yaw;
-    this.act({ t: 'spray', x: p.x + Math.sin(a) * 1.1, z: p.z + Math.cos(a) * 1.1 });
+    const p = this.pc, a = p.yaw, now = performance.now() / 1000;
+    const dur = Math.min(0.35, Math.max(0.08, now - (this._sprayT || 0)));
+    this._sprayT = now;
+    this.act({ t: 'spray', x: p.x, z: p.z, a, dur });
     this.pc.ry = a; this.reachT = 0.3;
   }
   // 手に持っている物（パック・BOX・消臭スプレー）のときの行動
@@ -352,8 +359,8 @@ export class Game {
       A.hint = '開けると10パックが出てきます。BOXのまま棚に並べて売ることもできます（BOXのほうが高く売れる）';
     } else if (hd.t === 'spray') {
       A.info = `🧴 <b>消臭スプレー</b> 残り ${Math.round(hd.u * 100)}%`;
-      extra.push({ label: '🧴 シュッ', icon: '🧴', repeat: true, fn: () => this._spray() });
-      A.hint = '臭いお客さん（緑のもやもや）に近づいてスプレー！2回で臭いが消えます';
+      extra.push({ label: '🧴 シューッ（長押し）', icon: '🧴', repeat: true, fn: () => { this._sprayT = this._sprayHeld ? this._sprayT : performance.now() / 1000 - 0.15; this._sprayHeld = true; this._spray(); } });
+      A.hint = '臭いお客さん（緑のもやもや）に向けて長押し！2秒くらい吹きかけると臭いが消えます。1本で3人くらい';
     }
     if (t?.type === 'fixture') {
       const f = t.f, def = FIXTURES[f.t];
@@ -644,6 +651,10 @@ export class Game {
       else if (a.repeat && inp.held.has(id) && this.timers.repeat <= 0) { a.fn(); this.timers.repeat = 0.13; this.reachT = 0.3; }
     }
     this.reachT = Math.max(0, (this.reachT || 0) - dt);
+    if (!['act', 'alt', 'box'].some((id) => inp.held.has(id))) this._sprayHeld = false;
+    // 消臭スプレーのゲージ
+    const hd = this.hand();
+    this.ui.setGauge?.(hd?.t === 'spray' ? hd.u : null);
   }
 
   // ---------- レジ ----------
@@ -854,7 +865,7 @@ export class Game {
       ['✨', 'どのレア度にも5%で「フラッシュ（箔付き）」が付く。カードが輝いて、相場は2.5倍。相場はレア度に見合った値段で、高い弾のレアカードほど高く売れる'],
       ['📒', '出たカードは📒コレクションファイル（Cキー・画面上の📒）に入る。9ポケットのページをめくって見られる'],
       ['🃏', 'シングルカード棚やカードテーブルを狙って「カードを置く」→ コレクションファイルから選んで並べると売れる。値段は相場の+20%まで'],
-      ['🤢', 'ときどき臭いお客さん（緑のもやもや）が来る。近くのお客さんがイヤがって帰ってしまうので、消臭スプレーを手に持って「シュッ」。2回で臭いが消える'],
+      ['🤢', 'ときどき臭いお客さん（緑のもやもや）が来る。近くのお客さんがイヤがって帰ってしまうので、消臭スプレーを手に持って長押しで「シューッ」。2秒くらい吹きかけると臭いが消える。画面のゲージが0になるとスプレーはなくなる（1本で3人くらい）'],
       ['🌬️', '消臭スプレーは仕入れて売ることも、自分で使うこともできる。Lv.5からオートセント（自動消臭機）が買えて、スプレーをセットすると自動で消臭（Lv.18・Lv.40でスプレーの間隔が短い機種が出る）'],
       ['🎮', 'プレイテーブルを置くと、お客さんが対戦してレジでプレイ料金を払ってくれる（料金はパソコンの「お店」で変更）'],
       ['🏷️', '倉庫棚の段には「ラベル」を貼れる。品出しは、ラベルの貼ってある段にだけその商品を置く（ラベルがないと外の段ボールを片付けない）'],

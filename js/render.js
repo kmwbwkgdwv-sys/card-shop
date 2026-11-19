@@ -620,10 +620,11 @@ export class Renderer {
     }
   }
   // 消臭スプレーのしぶき
-  sprayFx(x, y, z, tx, tz) {
+  sprayFx(x, y, z, tx, tz, n = 18) {
     this._spr ||= []; this._sprPool ||= [];
+    if (this._spr.length > 260) return;
     const map = mistTex(), dx = tx - x, dz = tz - z, d = Math.hypot(dx, dz) || 1, nx = dx / d, nz = dz / d;
-    for (let i = 0; i < 18; i++) {
+    for (let i = 0; i < n; i++) {
       let sp = this._sprPool.pop();
       if (!sp) { sp = new THREE.Sprite(new THREE.SpriteMaterial({ map, transparent: true, depthWrite: false })); sp.renderOrder = 7; }
       const sp0 = 1.3 + Math.random() * 1.8;

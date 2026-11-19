@@ -809,3 +809,12 @@ div.pstock { display: flex; align-items: baseline; gap: 4px; min-width: 0; max-w
   .ptile .pn { font-size: 11px; min-height: 2.4em; } .ptile .pm, .ptile .pstock { font-size: 9.5px; }
   .ptile .qty button { width: 24px; height: 24px; font-size: 14px; }
 }
+/* 消臭スプレーのゲージ */
+.spray-gauge { position: absolute; left: 50%; top: calc(50% + 34px); transform: translateX(-50%); display: flex; align-items: center; gap: 6px; background: rgba(255,255,255,.92); border-radius: 12px; padding: 4px 10px; box-shadow: var(--shadow); pointer-events: none; font-weight: 900; font-size: 13px; }
+.spray-gauge .sg-ic { font-size: 18px; }
+.spray-gauge .sg-bar { width: 120px; height: 10px; border-radius: 6px; background: #dfe9e4; overflow: hidden; }
+.spray-gauge .sg-bar i { display: block; height: 100%; width: 100%; background: linear-gradient(90deg, #36c08a, #7be0b6); transition: width .15s; }
+.spray-gauge.low .sg-bar i { background: linear-gradient(90deg, #ff6b6b, #ffb36b); }
+.spray-gauge b { min-width: 36px; text-align: right; color: #1f6b4a; }
+.spray-gauge.low b { color: #d0315a; }
+@media (max-height: 520px) { .spray-gauge { top: calc(50% + 24px); padding: 3px 8px; } .spray-gauge .sg-bar { width: 90px; } }

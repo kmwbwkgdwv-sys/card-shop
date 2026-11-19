@@ -2,8 +2,8 @@
 import { h, $, modal, toast, confirmBox, promptBox, choiceBox } from './ui.js';
 import { PRODUCTS, PRODUCTS_LIST, CATEGORIES, FIXTURES, FIXTURE_CATS, STAFF_ROLES, STAFF_NAMES, SPEEDS,
   productUnlocked, hasLicense, canOrder, hasStaffLicense, fixtureUnlocked, staffLimit, STAFF_SLOTS, STAFF_MAX, staffWage, xpNeed, closeTime, CHAT_PRESETS, SALES, STOCK_COLS, STOCK_ROWS, stockAt, expandTargets, marketPrice, marketCost, ORDER_MAX_BOXES, SHIPPING_FEE, MAX_LEVEL, halfQty, EMPTY_BOX, EMPTY_BOX_PRICE, boxProd,
-  unlocksAt, checkoutLimit, PLAY_FEE_MAX, isPack, isBoosterBox } from './data.js';
-import { CARDS, CARDS_LIST, SERIES, SERIES_BY, RARITY, RARITIES, CARD_RATES, FLASH_RATE, FLASH_MULT, PACK_SIZE, BOX_PACKS, cardValue, cardValuePrev, cardPrice, cardLimit, buybackPrice, BUYBACK, rarityOrder, collectionStats, displayedCount, seriesOfProduct } from './cards.js';
+  unlocksAt, checkoutLimit, PLAY_FORMATS, playFmtOf, playLimit, fmtUnlocked, isPack, isBoosterBox } from './data.js';
+import { CARDS, CARDS_LIST, SERIES, SERIES_BY, RARITY, RARITIES, CARD_RATES, FLASH_RATE, FLASH_MULT, PACK_SIZE, BOX_PACKS, cardValue, cardValuePrev, cardPrice, cardLimit, buybackPrice, BUYBACK, rarityOrder, collectionStats, displayedCount, seriesOfProduct, fmtTargetText } from './cards.js';
 import { packCanvas, boxCanvas } from './cardart.js';
 import { cardEl, cardDetail, packOpening } from './cardui.js';
 import { getPrice, orderCost, orderTotal, priceLimit, customerFactors, repStars } from './sim.js';
@@ -91,7 +91,7 @@ export class GameUI {
     let cat = 'pack', lcat = 'pack';
     const body = h('div', { class: 'pc-body' });
     const tabs = h('div', { class: 'tabs pc-apps' });
-    const TABS = [['order', '🛒', '仕入れ'], ['license', '🔑', 'ライセンス'], ['staff', '🧑‍💼', '従業員'], ['rep', '💬', '評判'], ['store', '🏪', 'お店']];
+    const TABS = [['order', '🛒', '仕入れ'], ['license', '🔑', 'ライセンス'], ['staff', '🧑‍💼', '従業員'], ['event', '🎮', 'イベント'], ['rep', '💬', '評判'], ['store', '🏪', 'お店']];
     if (tab === 'price') tab = 'order';
     const total = h('b'); const orderBtn = h('button', { class: 'btn' }, '注文する');
     const buyLicense = async (p, redraw) => {
@@ -107,7 +107,9 @@ export class GameUI {
       tabs.innerHTML = '';
       const canSLic = STAFF_SLOTS.filter((sl) => st.level >= sl.lv && !hasStaffLicense(st, sl.no)).length;
       const canLic = PRODUCTS_LIST.filter((p) => productUnlocked(p.id, st.level) && !hasLicense(st, p.id)).length + canSLic;
-      for (const [k, ic, n] of TABS) tabs.append(h('button', { class: 'tab app' + (k === tab ? ' on' : ''), onclick: () => { tab = k; draw(); } }, h('span', { class: 'ai' }, ic), h('span', { class: 'an' }, n), k === 'license' && canLic ? h('i', { class: 'badge' }, canLic) : k === 'staff' && canSLic ? h('i', { class: 'badge' }, canSLic) : null));
+      // 今より料金の高いイベント形式が開催できるようになったら知らせる（プレイテーブルがあるときだけ）
+      const canFmt = st.fixtures.some((f) => FIXTURES[f.t].seats) ? PLAY_FORMATS.filter((f) => fmtUnlocked(st, f) && f.fee > playFmtOf(st).fee).length : 0;
+      for (const [k, ic, n] of TABS) tabs.append(h('button', { class: 'tab app' + (k === tab ? ' on' : ''), onclick: () => { tab = k; draw(); } }, h('span', { class: 'ai' }, ic), h('span', { class: 'an' }, n), k === 'license' && canLic ? h('i', { class: 'badge' }, canLic) : k === 'staff' && canSLic ? h('i', { class: 'badge' }, canSLic) : k === 'event' && canFmt ? h('i', { class: 'badge' }, canFmt) : null));
       // ＋−を押して描き直してもスクロール位置がもどらないように覚えておく
       const key = tab + '|' + (tab === 'license' ? lcat : cat);
       const same = body.dataset.k === key, keepB = body.scrollTop, keepG = body.querySelector('.pgrid')?.scrollTop || 0;
@@ -250,18 +252,16 @@ export class GameUI {
             body.append(h('div', { class: 'scard locked' }, head, skills(sl.reg, sl.stk), h('div', { class: 'muted small' }, `🔒 お店 Lv.${sl.lv} で雇用ライセンス（${yen(sl.lic)}）が買えるようになります（日給 ${yen(sl.wage)}）`)));
           }
         }
+      } else if (tab === 'event') {
+        body.append(this.eventPanel(st, draw));
       } else if (tab === 'store') {
         const fee = st.playFee ?? 0;
         body.append(
           h('div', { class: 'pc-stats' }, stat('総売上', yen(st.totalSales)), stat('来店客数', st.totalCustomers + '人'), stat('評判', '⭐' + repStars(st.rep).toFixed(1)), stat('営業時間', `8:00〜${fmtTime(closeTime())}`),
             stat('開けたパック', (st.stats?.packs || 0) + '個'), stat('売れたシングル', (st.stats?.cardsSold || 0) + '枚'), stat('対戦したお客さん', (st.stats?.played || 0) + '人'), stat('レジの台数', `最大${checkoutLimit(st.level)}台`),
             stat('消臭したお客さん', (st.stats?.sprayed || 0) + '人'), stat('ライセンス', `${PRODUCTS_LIST.filter((p) => hasLicense(st, p.id)).length}/${PRODUCTS_LIST.length}`)),
-          h('div', { class: 'ed-label' }, '🎮 プレイテーブルの利用料（1回）'),
-          h('div', { class: 'row' },
-            h('button', { class: 'btn small ghost', onclick: () => { g.act({ t: 'playFee', v: fee - 50 }); setTimeout(draw, 150); } }, '−50'),
-            h('b', { class: 'fee' + (fee > PLAY_FEE_MAX ? ' bad' : '') }, yen(fee)),
-            h('button', { class: 'btn small ghost', onclick: () => { g.act({ t: 'playFee', v: fee + 50 }); setTimeout(draw, 150); } }, '+50'),
-            h('span', { class: 'muted small' }, `${yen(PLAY_FEE_MAX)}より高いとお客さんは遊んでくれません`)),
+          h('div', { class: 'ed-label' }, '🎮 プレイテーブル'),
+          h('div', { class: 'row' }, h('span', {}, `${playFmtOf(st).icon} イベント「${playFmtOf(st).name}」・1時間 ${yen(fee)}`), h('button', { class: 'btn small ghost', onclick: () => { tab = 'event'; draw(); } }, '🎮 イベントを開く')),
           h('div', { class: 'ed-label' }, '🏷 商品の値段をまとめて変える'),
           h('div', { class: 'row wrap' }, [[1, '🔄 全部 相場どおり'], [1.1, '相場の110%'], [1.2, '相場の120%（上限）'], [0.9, '相場の90%（お買い得）']].map(([k, t]) => h('button', { class: 'btn small ghost', onclick: () => { g.act({ t: 'priceAll', k }); setTimeout(draw, 150); } }, t))),
           h('div', { class: 'row' },
@@ -278,6 +278,47 @@ export class GameUI {
     this._live = () => { if (tab === 'order' || tab === 'rep') draw(); }; // 在庫・配送中・口コミは開いたままでも新しく
   }
   refresh() { this._redraw && this.open && this._redraw(); }
+  // ---------- 対戦イベント（原作の「TCG Event」アプリ） ----------
+  eventPanel(st, draw) {
+    const g = this.g, cur = playFmtOf(st), fee = st.playFee ?? cur.fee, lim = playLimit(st), played = st.stats?.played || 0;
+    const tables = st.fixtures.filter((f) => FIXTURES[f.t].seats), seats = tables.reduce((n, f) => n + FIXTURES[f.t].seats.length, 0);
+    const step = cur.fee >= 2000 ? 500 : cur.fee >= 1000 ? 100 : 50;
+    const setFee = (v) => { g.act({ t: 'playFee', v }); setTimeout(draw, 150); };
+    const T = st.today || {};
+    const head = h('div', { class: 'ev-head' },
+      h('div', { class: 'ev-cur' }, h('span', { class: 'ev-ic' }, cur.icon), h('div', {}, h('div', { class: 'muted small' }, '今日のイベント'), h('b', {}, cur.name), h('div', { class: 'muted small' }, `相場：${cur.eff}`))),
+      h('div', { class: 'pc-stats' },
+        stat('プレイテーブル', tables.length ? `${tables.length}台（${seats}席）` : 'なし'), stat('対戦したお客さん（累計）', played + '人'),
+        stat('今日の対戦', `${T.played || 0}人`), stat('今日のプレイ料金', yen(T.playSales || 0)), stat('運営費（1日）', cur.cost ? yen(cur.cost) : '無料')),
+      h('div', { class: 'ed-label' }, '💴 料金（1時間あたり・遊んだ時間ぶんをゲームが終わったときに払ってくれます）'),
+      h('div', { class: 'row wrap' },
+        h('button', { class: 'btn small ghost', onclick: () => setFee(fee - step) }, '−' + step),
+        h('b', { class: 'fee' + (fee > lim ? ' bad' : '') }, yen(fee)),
+        h('button', { class: 'btn small ghost', onclick: () => setFee(fee + step) }, '+' + step),
+        h('button', { class: 'btn small ghost', onclick: () => setFee(cur.fee) }, `基本 ${yen(cur.fee)}`),
+        h('button', { class: 'btn small ghost', onclick: () => setFee(lim) }, `ギリギリ ${yen(lim)}`)),
+      h('div', { class: 'muted small' + (fee > lim ? ' bad' : '') }, fee > lim ? `⚠️ ${yen(lim)}より高いので、お客さんが遊んでくれません！` : `${yen(lim)}（基本料金の120%）までなら遊んでくれます。🏷️値段係の従業員がいると自動でギリギリの料金にしてくれます`),
+      !tables.length ? h('div', { class: 'ev-warn' }, '🎮 プレイテーブル（Lv.2〜）を置くと、お客さんが対戦しに来ます') : null,
+      st.fmtEf && st.fmtEf.id ? h('div', { class: 'muted small' }, `📈 きのうのイベントの影響：${[fmtTargetText(st.fmtEf.up) && fmtTargetText(st.fmtEf.up) + ' ▲', fmtTargetText(st.fmtEf.down) && fmtTargetText(st.fmtEf.down) + ' ▼'].filter(Boolean).join('　')}`) : null);
+    const grid = h('div', { class: 'pgrid plist2 evlist' });
+    const prep = st.phase === 'prep';
+    for (const f of PLAY_FORMATS) {
+      const ok = fmtUnlocked(st, f), on = f.id === cur.id;
+      const need = [st.level < f.lv ? `Lv.${f.lv}` : null, played < f.need ? `対戦 ${played}/${f.need}人` : null].filter(Boolean).join('・');
+      grid.append(h('div', { class: 'prow2 ev' + (on ? ' have' : ok ? ' nolic' : ' locked') },
+        h('div', { class: 'pe tile' }, f.icon),
+        h('div', { class: 'pinfo2' }, h('div', { class: 'pn' }, f.name),
+          h('div', { class: 'pm' }, `1時間 ${yen(f.fee)}・運営費 ${f.cost ? yen(f.cost) + '/日' : '無料'}・お客さん ${f.pop > 1 ? '+' + Math.round((f.pop - 1) * 100) + '%' : 'ふつう'}`),
+          h('div', { class: 'pm' }, `📈 ${f.eff}`),
+          h('div', { class: 'pm muted' }, `解放：お店 Lv.${f.lv}・対戦したお客さん ${f.need}人`)),
+        on ? h('div', { class: 'lic-have' }, '✅ 開催中')
+          : ok ? h('button', { class: 'btn small lic-btn', disabled: !prep, title: prep ? '' : 'お店を開ける前だけ変えられます', onclick: () => { g.act({ t: 'playFmt', id: f.id }); setTimeout(draw, 150); } }, h('span', {}, prep ? '🎮 この形式にする' : '🕗 準備中に変更'))
+            : h('div', { class: 'lock' }, '🔒 ' + need)));
+    }
+    return h('div', { class: 'evpanel' }, head,
+      h('p', { class: 'muted small' }, '🎮 形式は「お店を開ける前（準備中）」だけ変えられます。運営費はプレイテーブルを置いている日に毎日かかります（お客さんが来なくてもかかります）。対戦したお客さんがいた次の日は、形式に合わせてカードの相場が動きます。対戦中・相手待ちのお客さんは、お店の人数を半人分しか使いません。'),
+      grid);
+  }
   // ---------- 評判と口コミ（どこにいても見られる） ----------
   openRep() {
     const g = this.g, body = h('div', { class: 'pc-body tab-rep' });
@@ -366,7 +407,7 @@ export class GameUI {
     const maxed = st.level >= MAX_LEVEL;
     body.append(h('div', { class: 'lv-now' }, h('b', {}, `🏪 お店 Lv.${st.level}${maxed ? ' MAX' : ''}`),
       h('div', { class: 'bar big' }, h('i', { style: { width: (maxed ? 100 : Math.min(100, st.xp / xpNeed(st.level) * 100)) + '%' } })),
-      h('span', { class: 'muted small' }, maxed ? '最高レベルです！' : `次のレベルまで ${(xpNeed(st.level) - st.xp).toLocaleString()} XP（売上 ¥50 ごとに 1XP）`)));
+      h('span', { class: 'muted small' }, maxed ? '最高レベルです！' : `次のレベルまで ${(xpNeed(st.level) - st.xp).toLocaleString()} XP（お会計・対戦のたびにもらえる。高い買い物ほど多い）`)));
     const list = h('div', { class: 'lv-list' });
     for (let lv = 2; lv <= MAX_LEVEL; lv++) {
       const u = unlocksAt(lv); if (!u.length) continue;
@@ -650,16 +691,16 @@ export class GameUI {
   showSummary(d, isHost) {
     const g = this.g;
     const row = (k, v, cls) => h('div', { class: 'sum-row ' + (cls || '') }, h('span', {}, k), h('b', {}, v));
-    const income = d.sales + (d.vend || 0) + (d.recycle || 0) + (d.buyback || 0), cost = d.orders + (d.ship || 0) + d.wages + d.bills;
+    const income = d.sales + (d.vend || 0) + (d.recycle || 0) + (d.buyback || 0), cost = d.orders + (d.ship || 0) + d.wages + d.bills + (d.event || 0);
     const mx = Math.max(1, income, cost);
     const bar = (v, cls) => h('div', { class: 'sum-bar' }, h('i', { class: cls, style: { width: Math.round(v / mx * 100) + '%' } }));
     const diff = d.prevProfit == null ? null : d.profit - d.prevProfit;
     const left = h('div', { class: 'sum-col' },
       h('div', { class: 'sum-h' }, '💰 収入'), bar(income, 'plus'),
-      row('売上', '+' + yen(d.sales), 'plus'), d.cardSales ? row('　うちシングル', yen(d.cardSales), 'sub') : null, d.playSales ? row('　うちプレイ料金', yen(d.playSales), 'sub') : null,
+      row('売上', '+' + yen(d.sales), 'plus'), d.cardSales ? row('　うちシングル', yen(d.cardSales), 'sub') : null, d.playSales ? row('　うちプレイ料金', `${yen(d.playSales)}（${d.played || 0}人）`, 'sub') : null,
       d.buyback ? row('カード買取', '+' + yen(d.buyback), 'plus') : null, d.vend ? row('自販機', '+' + yen(d.vend), 'plus') : null, d.recycle ? row('リサイクル', '+' + yen(d.recycle), 'plus') : null,
       h('div', { class: 'sum-h' }, '💸 支出'), bar(cost, 'minus'),
-      row('仕入れ', '−' + yen(d.orders), 'minus'), d.ship ? row('送料', '−' + yen(d.ship), 'minus') : null, row('人件費', '−' + yen(d.wages), 'minus'), row('光熱費・家賃', '−' + yen(d.bills), 'minus'),
+      row('仕入れ', '−' + yen(d.orders), 'minus'), d.ship ? row('送料', '−' + yen(d.ship), 'minus') : null, row('人件費', '−' + yen(d.wages), 'minus'), row('光熱費・家賃', '−' + yen(d.bills), 'minus'), d.event ? row(`イベント運営費（${PLAY_FORMATS.find((f) => f.id === d.fmt)?.name || ''}）`, '−' + yen(d.event), 'minus') : null,
       d.lic ? row('ライセンス（利益の計算には入れない）', '−' + yen(d.lic), 'sub') : null,
       h('div', { class: 'sum-total ' + (d.profit >= 0 ? 'plus' : 'minus') }, h('span', {}, '本日の利益'), h('b', {}, (d.profit >= 0 ? '+' : '−') + yen(Math.abs(d.profit)))),
       diff == null ? null : h('div', { class: 'muted small right' }, `前日比 ${diff >= 0 ? '▲ +' : '▼ −'}${yen(Math.abs(diff))}`),
@@ -670,9 +711,9 @@ export class GameUI {
     const right = h('div', { class: 'sum-col' },
       h('div', { class: 'sum-h' }, '🏆 よく売れた商品'),
       top.length ? h('div', { class: 'sum-top' }, top.map(([p, [n, rev]], i) => h('div', { class: 'sum-item' }, h('span', { class: 'rk' }, ['🥇', '🥈', '🥉'][i] || (i + 1) + '.'), h('span', { class: 'ic' }, iconOf(p)),
-        h('span', { class: 'nm' }, nameOf(p)), h('span', { class: 'muted small' }, `${n}個`), h('b', {}, yen(rev))))) : h('p', { class: 'muted small' }, '今日は何も売れませんでした…'),
+        h('span', { class: 'nm' }, nameOf(p)), h('span', { class: 'muted small' }, p === '_play' ? `${n}人` : `${n}個`), h('b', {}, yen(rev))))) : h('p', { class: 'muted small' }, '今日は何も売れませんでした…'),
       h('div', { class: 'sum-h' }, '📈 お店の様子'),
-      row('お会計したお客さん', d.served + '人'), d.packs ? row('開けたパック', d.packs + '個') : null, row('怒って帰ったお客さん', d.lost + '人', d.lost ? 'minus' : ''),
+      row('お会計したお客さん', d.served + '人'), d.played ? row('対戦したお客さん', `${d.played}人（${Math.round((d.playMin || 0) / 60 * 10) / 10}時間）`) : null, d.packs ? row('開けたパック', d.packs + '個') : null, row('怒って帰ったお客さん', d.lost + '人', d.lost ? 'minus' : ''),
       d.smelly ? row('臭いお客さん', `${d.smelly}人（消臭 ${d.cleaned || 0}人${d.smellLost ? `・臭いで帰った ${d.smellLost}人` : ''}）`, d.smellLost ? 'minus' : '') : null, row('獲得経験値', d.xp + ' XP'), row('評判', `⭐ ${repStars(d.rep).toFixed(1)}` + (d.repPrev != null ? `（${d.rep >= d.repPrev ? '▲' : '▼'}${Math.abs(repStars(d.rep) - repStars(d.repPrev)).toFixed(1)}）` : ''), d.repPrev != null && d.rep < d.repPrev ? 'minus' : ''),
       (() => { const rv = d.rv || [0, 0, 0, 0, 0], n = rv.reduce((a, b) => a + b, 0); return n ? row('今日の評価', `★${(rv.reduce((a, c, i) => a + c * (i + 1), 0) / n).toFixed(1)}（${n}人）`) : null; })(),
       row('お店のレベル', 'Lv.' + d.level + (d.level >= MAX_LEVEL ? ' MAX' : '')));

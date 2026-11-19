@@ -818,3 +818,19 @@ div.pstock { display: flex; align-items: baseline; gap: 4px; min-width: 0; max-w
 .spray-gauge b { min-width: 36px; text-align: right; color: #1f6b4a; }
 .spray-gauge.low b { color: #d0315a; }
 @media (max-height: 520px) { .spray-gauge { top: calc(50% + 24px); padding: 3px 8px; } .spray-gauge .sg-bar { width: 90px; } }
+/* ---- 対戦イベント（パソコンの「イベント」） ---- */
+.evpanel { display: flex; flex-direction: column; gap: 8px; }
+.ev-head { background: linear-gradient(135deg, #eef4ff, #f6efff); border: 2px solid #dfe3fb; border-radius: 16px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.ev-cur { display: flex; align-items: center; gap: 10px; }
+.ev-cur b { font-size: 18px; }
+.ev-ic { font-size: 34px; line-height: 1; }
+.ev-warn { background: #fff4e0; border: 2px solid #ffd59a; border-radius: 10px; padding: 6px 10px; font-weight: 800; font-size: 13px; }
+.muted.bad { color: var(--bad); font-weight: 800; }
+.prow2.ev .pe.tile { font-size: 28px; display: grid; place-items: center; width: 48px; height: 48px; border-radius: 12px; background: #f1f0fa; justify-self: center; }
+.prow2.ev.have { background: #f2fff6; border-color: #bdf0d3; }
+.prow2.ev .pm { font-size: 12px; }
+.prow2.ev .lic-btn { background: #6c5ce7; color: #fff; box-shadow: 0 3px 0 #4b3db8; }
+.prow2.ev .lic-btn:disabled { background: #c9c5e6; box-shadow: none; color: #fff; }
+.ev-head .pc-stats { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin: 2px 0; }
+.ev-head .stat { background: #fff; padding: 5px 8px; } .ev-head .stat .k { font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .ev-head .stat .v { font-size: 15px; }
+@media (max-width: 900px) { .ev-head .pc-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); } .ev-cur b { font-size: 16px; } .ev-ic { font-size: 28px; } }

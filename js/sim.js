@@ -4,7 +4,7 @@ import {
   OPEN_TIME, GAME_MIN_PER_SEC, SPAWN_POINTS, PLAYER_BOUNDS, START_BAYS, START_STOCK, STAFF_HOME, STOCK_SECTIONS, bayAt, doorOpen, snapFixture,
   getWalls, zones, keepClear, expandTargets, fixtureFootprint, marketPrice, marketCost, slotCapacity, slotAccess, rackAccess, checkoutSpot, canPlace,
   STAFF_SLOTS, SPEEDS, staffK, staffSpd, staffWage, slotWage, staffSlotOpen, checkoutLimit, closeTime, xpNeed, productUnlocked, fixtureUnlocked, localToWorld, CELL, TRASH_TYPES, ORDER_MAX_BOXES, SHIPPING_FEE,
-  MAX_LEVEL, boxUnits, MANAGER, XP_YEN, BUILDING, EMPTY_BOX, EMPTY_BOX_PRICE, boxProd, boxLook, isPack, isBoosterBox, cardAccess, seatSpot, unlocksAt, PLAY_FEE, PLAY_FEE_MAX,
+  MAX_LEVEL, boxUnits, MANAGER, XP_YEN, xpOf, BUILDING, EMPTY_BOX, EMPTY_BOX_PRICE, boxProd, boxLook, isPack, isBoosterBox, cardAccess, seatSpot, unlocksAt, PLAY_FEE, PLAY_FORMATS, PLAY_FORMAT, playFmtOf, playLimit, fmtUnlocked, playCharge,
   canOrder, hasLicense, isSpray, SPRAY_ID, staffFav, slotPositions, hasStaffLicense,
 } from './data.js';
 import { CARDS, CARDS_LIST, BOX_PACKS, openPack, openBox, cardValue, cardLimit, cardPrice, updateCardMarket, buybackPrice, seriesOfProduct, rarityOrder, isHit, cardRank, baseId } from './cards.js';
@@ -12,6 +12,7 @@ import { NavGrid } from './nav.js';
 import { rand, randi, pick, dist, dist2, clamp } from './util.js';
 
 export const SAVE_V = 1;
+const GAMER_GAP = 75; // 席1つあたり、だいたい何秒に1人対戦しに来るか
 export function newStore(name) {
   const st = {
     v: SAVE_V, name: name || 'アニモンカードショップ', money: 30000, day: 1, level: 1, xp: 0, rep: 50,
@@ -23,14 +24,14 @@ export function newStore(name) {
     fixtures: initialFixtures(),
     boxes: [], reviews: [], crates: [],
     // カード：持っている枚数・図鑑（一度でも手に入れたカード）・自分で決めた値段・相場の変動
-    cards: {}, dex: {}, cprices: {}, cmk: {}, cmkPrev: {}, playFee: PLAY_FEE,
+    cards: {}, dex: {}, cprices: {}, cmk: {}, cmkPrev: {}, playFee: PLAY_FEE, playFmt: 'free',
     stats: { packs: 0, boxes: 0, cardsSold: 0, played: 0, sprayed: 0 },
     // ライセンス（買った商品だけ仕入れられる）・手に持っている物（パック最大5／BOX1つ／消臭スプレー1本）
     lic: {}, hand: {}, slic: {},
   };
   return st;
 }
-const newToday = () => ({ sales: 0, served: 0, lost: 0, orders: 0, ship: 0, xp: 0, vend: 0, recycle: 0, cardSales: 0, playSales: 0, buyback: 0, packs: 0, lic: 0, smelly: 0, cleaned: 0, smellLost: 0 });
+const newToday = () => ({ sales: 0, served: 0, lost: 0, orders: 0, ship: 0, xp: 0, vend: 0, recycle: 0, cardSales: 0, playSales: 0, played: 0, playMin: 0, buyback: 0, packs: 0, lic: 0, smelly: 0, cleaned: 0, smellLost: 0 });
 function initialFixtures() {
   return [
     // パソコン室（入口の右）：正面の壁ぎわにパソコンの机、左右の壁にカード相場ボードと拡張ボード
@@ -63,7 +64,7 @@ export function normalizeStore(st) {
   st.crates ||= []; st.reviews ||= []; st.market ||= {}; st.marketPrev ||= {};
   st.bays ||= Object.fromEntries(START_BAYS.map((b) => [b, 1])); st.stock ||= Object.fromEntries(START_STOCK.map((b) => [b, 1]));
   st.prices ||= {}; st.staff ||= []; st.boxes ||= []; st.fixtures ||= [];
-  st.cards ||= {}; st.dex ||= {}; st.cprices ||= {}; st.cmk ||= {}; st.cmkPrev ||= {}; st.playFee ??= PLAY_FEE;
+  st.cards ||= {}; st.dex ||= {}; st.cprices ||= {}; st.cmk ||= {}; st.cmkPrev ||= {}; st.playFee ??= PLAY_FEE; if (!PLAY_FORMAT[st.playFmt]) st.playFmt = 'free';
   // ライセンス：前のセーブデータは、レベルで入荷できていた商品のライセンスを持っていることにする
   if (!st.lic) { st.lic = {}; for (const p of PRODUCTS_LIST) if (productUnlocked(p.id, st.level || 1)) st.lic[p.id] = 1; }
   for (const k of Object.keys(st.lic)) if (!PRODUCTS[k]) delete st.lic[k];
@@ -451,8 +452,20 @@ export class Sim {
   }
   a_playFee(uid, a) {
     if (!this.atBoard(uid)) return this.err(uid, BOARD_ONLY);
-    this.store.playFee = clamp(Math.round((+a.v || 0) / 10) * 10, 0, 3000);
+    const f = playFmtOf(this.store);
+    this.store.playFee = clamp(Math.round((+a.v || 0) / 10) * 10, 0, f.fee * 3);
     this.bump();
+  }
+  // 対戦イベントの形式をえらぶ（お店を開ける前だけ。料金はその形式の基本料金になる）
+  a_playFmt(uid, a) {
+    if (!this.atBoard(uid)) return this.err(uid, BOARD_ONLY);
+    const st = this.store, f = PLAY_FORMAT[a.id];
+    if (!f) return;
+    if (st.phase !== 'prep') return this.err(uid, 'イベントの形式は、お店を開ける前（準備中）にだけ変えられます');
+    if (!fmtUnlocked(st, f)) return this.err(uid, `まだ開催できません（お店Lv.${f.lv}・対戦したお客さん${f.need}人）`);
+    st.playFmt = f.id; st.playFee = f.fee;
+    this.toast(uid, `${f.icon} 今日のイベントは「${f.name}」（1時間 ${f.fee.toLocaleString()}円${f.cost ? `・運営費 ${f.cost.toLocaleString()}円/日` : ''}）`, 'ok');
+    this.sfx('click'); this.bump();
   }
   a_expand(uid, a) {
     if (!this.atBoard(uid)) return this.err(uid, BOARD_ONLY);
@@ -493,9 +506,13 @@ export class Sim {
     const st = this.store;
     if (st.phase !== 'summary') return;
     st.phase = 'prep'; st.day++; st.time = OPEN_TIME;
+    const playedY = st.today.played || 0;
     st.today = newToday();
     this.updateMarket();
-    updateCardMarket(st);
+    // きのう対戦イベントで遊んだ人がいたら、その形式に合わせてカード相場が動く
+    const ef = playedY > 0 ? this.fmtEffect(playFmtOf(st)) : null;
+    updateCardMarket(st, Math.random, ef);
+    st.fmtEf = ef ? { id: playFmtOf(st).id, up: ef.up, down: ef.down } : null;
     for (const c of this.dyn.customers) this.returnCards(c);
     this.dyn.customers = []; this.dyn.seats = {};
     for (const fid in this.dyn.regs) this.resetReg(+fid, true);
@@ -510,8 +527,14 @@ export class Sim {
     // カード相場：持っているカードでいちばん値上がりしたもの
     let cup = null;
     for (const cid of Object.keys(st.dex)) { const m0 = st.cmkPrev[cid], m1 = st.cmk[cid]; if (!m0) continue; const d = m1 / m0 - 1; if (!cup || d > cup[1]) cup = [cid, d]; }
-    this.ev({ t: 'newday', day: st.day, up: up && up[1] > 0.03 ? [up[0], Math.round(up[1] * 100)] : null, down: down && down[1] < -0.03 ? [down[0], Math.round(-down[1] * 100)] : null, cup: cup && cup[1] > 0.04 ? [cup[0], Math.round(cup[1] * 100)] : null });
+    this.ev({ t: 'newday', day: st.day, up: up && up[1] > 0.03 ? [up[0], Math.round(up[1] * 100)] : null, down: down && down[1] < -0.03 ? [down[0], Math.round(-down[1] * 100)] : null, cup: cup && cup[1] > 0.04 ? [cup[0], Math.round(cup[1] * 100)] : null, fe: st.fmtEf || null });
     this.bump();
+  }
+  // 対戦イベントの相場への影響（フリー対戦は、ランダムなレア度が上がる・別のレア度が下がる）
+  fmtEffect(f) {
+    if (!f) return null;
+    if (f.up?.rand) { const rs = ['N', 'R', 'SR', 'SSR', 'HR', 'UR'], a = pick(rs); let b = pick(rs); while (b === a) b = pick(rs); return { up: { r: [a] }, down: { r: [b] } }; }
+    return { up: f.up, down: f.down };
   }
   updateMarket() {
     const st = this.store;
@@ -891,7 +914,7 @@ export class Sim {
       if (st.phase === 'open' && st.time >= closeTime()) {
         st.phase = 'closing'; this.toast(null, '閉店時間です！最後のお客さんの会計をしよう', 'warn'); this.bump();
       }
-      if (st.phase === 'open') this.updateSpawn(dt);
+      if (st.phase === 'open') { this.updateSpawn(dt); this.updateGamers(dt); }
       if (st.phase === 'closing' && dyn.customers.length === 0) this.finishDay();
     }
     if (dyn.dropT > 0 && (dyn.dropT -= dt) <= 0) { for (const b of st.boxes) delete b.drop; }
@@ -958,6 +981,23 @@ export class Sim {
   }
 
   // ---------- お客さん ----------
+  custLoad() { let n = 0; for (const c of this.dyn.customers) n += c.seat && (c.st === 'play' || c.st === 'wait') ? 0.5 : 1; return n; }
+  maxCust() {
+    const st = this.store, nReg = st.fixtures.filter((x) => FIXTURES[x.t].cat === 'checkout').length;
+    return Math.min(this.custCap || 36, 4 + Math.floor(st.level * 0.7) + nReg * 2 + Math.floor(Object.keys(st.bays || {}).length / 4));
+  }
+  // 対戦しに来るお客さん（ふつうのお客さんとは別に来る）：空いている席が多いほど・上の形式ほど来やすい
+  updateGamers(dt) {
+    const st = this.store, dyn = this.dyn;
+    if ((dyn.gameT ??= 6) > 0 && (dyn.gameT -= dt) > 0) return;
+    let all = 0, free = 0;
+    for (const f of st.fixtures) { const n = FIXTURES[f.t].seats?.length || 0; if (!n) continue; all += n; const s = dyn.seats[f.id]; free += s ? s.filter((x) => !x).length : n; }
+    const coming = dyn.customers.filter((c) => c.kind === 'gamer' && !c.seat && !c.played && !c.noPlay).length;
+    if (!all || free - coming <= 0 || st.playFee > playLimit(st)) { dyn.gameT = 4; if (all && st.playFee > playLimit(st) && Math.random() < 0.15) this.spawnCustomer('gamer'); return; }
+    dyn.gameT = (GAMER_GAP / (all * playFmtOf(st).pop)) * rand(0.6, 1.4);
+    if (this.custLoad() >= this.maxCust() + 2) return;
+    this.spawnCustomer('gamer');
+  }
   updateSpawn(dt) {
     const st = this.store, dyn = this.dyn;
     dyn.spawnT -= dt;
@@ -966,12 +1006,12 @@ export class Sim {
     const curve = 0.65 + 0.55 * Math.exp(-(((t - 720) / 100) ** 2)) + 0.7 * Math.exp(-(((t - 1080) / 110) ** 2));
     const f = customerFactors(st);
     dyn.spawnT = (15 / (curve * f.rep * f.lv * f.size * f.attract)) * rand(0.6, 1.4);
-    const nReg = st.fixtures.filter((x) => FIXTURES[x.t].cat === 'checkout').length;
-    const maxC = Math.min(this.custCap || 36, 4 + Math.floor(st.level * 0.7) + nReg * 2 + Math.floor(Object.keys(st.bays || {}).length / 4));
-    if (dyn.customers.length >= maxC) return;
+    const maxC = this.maxCust();
+    // プレイテーブルで対戦中・相手待ちのお客さんは半人分（原作と同じ）
+    if (this.custLoad() >= maxC) return;
     this.spawnCustomer();
   }
-  spawnCustomer() {
+  spawnCustomer(force) {
     const st = this.store;
     const [sx, sz] = pick(SPAWN_POINTS);
     const stocked = new Map();
@@ -979,9 +1019,8 @@ export class Sim {
     const unlocked = PRODUCTS_LIST.filter((p) => canOrder(st, p.id)).map((p) => p.id);
     const hasCards = st.fixtures.some((f) => f.cs && f.cs.some(Boolean));
     const topPack = Math.max(150, ...PRODUCTS_LIST.filter((p) => p.cat === 'pack' && canOrder(st, p.id)).map((p) => p.price));
-    const hasPlay = st.fixtures.some((f) => FIXTURES[f.t].seats);
     const r = Math.random();
-    const kind = hasCards && r < 0.3 ? 'collector' : hasPlay && r < 0.5 ? 'gamer' : 'shopper';
+    const kind = force || (hasCards && r < 0.3 ? 'collector' : 'shopper');
     // 欲しい商品（パックが一番人気）
     const W = { pack: 3, box: 0.9, supply: 1.1, goods: 1.0, other: 0.6 };
     const want = () => {
@@ -1113,23 +1152,65 @@ export class Sim {
   }
   goPlay(c) {
     const st = this.store, dyn = this.dyn;
-    if (st.playFee > PLAY_FEE_MAX) { this.bubble(c, 'pricey'); c.mood -= 1; c.why2 = 'playfee'; if (c.pricey.length < 3) c.pricey.push('_play'); c.noPlay = true; return false; }
+    if (st.phase !== 'open') { c.noPlay = true; return false; }
+    if (st.playFee > playLimit(st)) { this.bubble(c, 'pricey'); c.mood -= 1; c.why2 = 'playfee'; if (c.pricey.length < 3) c.pricey.push('_play'); c.noPlay = true; return false; }
     const tables = st.fixtures.filter((f) => FIXTURES[f.t].seats);
-    let best = null, bs = -1e9;
+    let best = null, bsi = -1, bs = -1e9;
     for (const f of tables) {
-      const seats = (dyn.seats[f.id] ||= FIXTURES[f.t].seats.map(() => 0));
-      const used = seats.filter(Boolean).length;
-      if (used >= seats.length) continue;
-      const sc = (used ? 20 : 0) - dist(c.x, c.z, f.x, f.z); // 相手が座っているテーブルを優先
-      if (sc > bs) { bs = sc; best = f; }
+      const def = FIXTURES[f.t], seats = (dyn.seats[f.id] ||= def.seats.map(() => 0));
+      for (const [a, b] of def.pairs || [[0, 1]]) {
+        for (const [si, oi] of [[a, b], [b, a]]) {
+          if (seats[si]) continue;
+          const sc = (seats[oi] ? 30 : 0) - dist(c.x, c.z, f.x, f.z); // 相手が待っている席を優先
+          if (sc > bs) { bs = sc; best = f; bsi = si; }
+        }
+      }
     }
     if (!best) { c.noPlay = true; return false; }
-    const seats = dyn.seats[best.id], si = seats.findIndex((x) => !x);
+    const seats = dyn.seats[best.id], si = bsi;
     const [x, z] = seatSpot(best, si);
     if (!this.goto(c, x, z)) { c.noPlay = true; return false; }
     seats[si] = c.id; c.seat = [best.id, si];
     c.st = 'goplay'; c.an = 'walk';
     return true;
+  }
+  // 同じテーブルで向かい合っている席の相手
+  opponent(c) {
+    if (!c.seat) return null;
+    const f = this.fx(c.seat[0]), def = f && FIXTURES[f.t]; if (!def) return null;
+    const pr = (def.pairs || [[0, 1]]).find((p) => p.includes(c.seat[1])); if (!pr) return null;
+    const oi = pr[0] === c.seat[1] ? pr[1] : pr[0], oid = this.dyn.seats[f.id]?.[oi];
+    return oid ? this.dyn.customers.find((o) => o.id === oid) || null : null;
+  }
+  // 2人そろったら対戦スタート（料金はスタートしたときの値段）
+  startMatch(a, b) {
+    const dur = rand(25, 55);
+    for (const c of [a, b]) {
+      c.st = 'play'; c.t = dur; c.t0 = dur; c.an = 'idle'; c.pt = rand(0.3, 1.5); c.fee = this.store.playFee; c.opp = c === a ? b.id : a.id;
+      this.bubble(c, 'game');
+    }
+  }
+  // 対戦おわり：遊んだ時間ぶんの料金をその場で払う（レジには並ばない）
+  endPlay(c) {
+    const st = this.store;
+    if (c.st !== 'play') return;
+    const min = Math.max(0, (c.t0 - Math.max(0, c.t))) * GAME_MIN_PER_SEC;
+    const pay = playCharge(c.fee ?? st.playFee, min);
+    c.st = 'played'; c.played = true;
+    st.today.played = (st.today.played || 0) + 1; st.today.playMin = (st.today.playMin || 0) + Math.round(min); st.stats.played++;
+    if (pay > 0) {
+      st.money += pay; st.today.sales += pay; st.totalSales += pay; st.today.playSales += pay;
+      const e = ((st.today.items ||= {})._play ||= [0, 0]); e[0]++; e[1] += pay;
+      this.gainXp(pay);
+      this.ev({ t: 'playpay', x: c.x, z: c.z, total: pay });
+      this.sfx('cash', c.x, c.z);
+    }
+    const o = this.dyn.customers.find((x) => x.id === c.opp);
+    this.freeSeat(c);
+    if (o && o.st === 'play') this.endPlay(o);
+    this.bubble(c, 'happy');
+    this.dynRev++; this.bump();
+    this.afterShop(c);
   }
   freeSeat(c) {
     if (!c.seat) return;
@@ -1139,7 +1220,11 @@ export class Sim {
   // テーブルを動かした・売ったときは座っている人を立たせる
   kickSeats(fid) {
     const s = this.dyn.seats[fid]; if (!s) return;
-    for (const cid of s) { const c = this.dyn.customers.find((o) => o.id === cid); if (c) { c.seat = null; c.played = true; this.toCheckout(c); } }
+    for (const cid of s) {
+      const c = this.dyn.customers.find((o) => o.id === cid); if (!c) continue;
+      if (c.st === 'play') { this.endPlay(c); continue; }
+      if (c.seat) { c.seat = null; c.played = true; this.afterShop(c); }
+    }
     delete this.dyn.seats[fid];
   }
   toCheckout(c) {
@@ -1176,7 +1261,11 @@ export class Sim {
     for (const b of c.basket || []) if (b.p === '_card' && b.c && CARDS[b.c]) st.cards[b.c] = (st.cards[b.c] || 0) + 1;
   }
   leave(c, angry) {
+    // 対戦中に帰ってしまったら、相手はそこまで遊んだぶんを払って終わり
+    const opp = c.st === 'play' ? this.dyn.customers.find((x) => x.id === c.opp) : null;
+    if (c.st === 'play') c.st = 'left';
     this.freeSeat(c);
+    if (opp && opp.st === 'play') this.endPlay(opp);
     this.returnCards(c);
     if (c.reg) { const r = this.dyn.regs[c.reg]; if (r) { r.q = r.q.filter((id) => id !== c.id); if (r.cust === c.id) this.resetReg(c.reg); } c.reg = null; }
     if (angry) { this.bubble(c, 'angry'); this.store.today.lost++; }
@@ -1259,19 +1348,29 @@ export class Sim {
           const f = this.fx(c.seat?.[0]);
           if (!f) { c.noPlay = true; return this.afterShop(c); }
           c.ry = Math.atan2(f.x - c.x, f.z - c.z);
-          c.st = 'play'; c.t = rand(22, 40); c.an = 'idle'; c.pt = 0; this.bubble(c, 'game');
+          c.an = 'idle';
+          const o = this.opponent(c);
+          if (o && o.st === 'wait') this.startMatch(o, c);
+          else { c.st = 'wait'; c.t = rand(45, 70); this.bubble(c, 'wait'); } // 相手が来るのを待つ（待っている間はお金がかからない）
         }
         break;
+      }
+      case 'wait': {
+        c.t -= dt;
+        const o = this.opponent(c);
+        if (o && o.st === 'wait') { this.startMatch(c, o); break; }
+        if (c.t > 0 && st.phase === 'open') break;
+        // 相手が来なかった
+        this.freeSeat(c); c.noPlay = true; c.mood -= 0.5; this.bubble(c, 'none');
+        return this.afterShop(c);
       }
       case 'play': {
         c.t -= dt; c.pt -= dt;
         if (c.pt <= 0) { c.pt = rand(1.2, 3.5); c.an = c.an === 'reach' ? 'idle' : 'reach'; if (Math.random() < 0.12) this.bubble(c, pick(['game', 'happy', 'wow'])); }
-        if (c.t > 0) break;
-        this.freeSeat(c);
-        c.played = true; st.stats.played++;
-        if (st.playFee > 0) c.basket.push({ p: '_play', price: st.playFee });
-        this.bubble(c, 'happy');
-        return this.afterShop(c);
+        // 閉店（CLOSED）になったら、そこまで遊んだぶんで終わり
+        if (c.t > 0 && st.phase === 'open') break;
+        this.endPlay(c);
+        break;
       }
       case 'q': {
         this.updateQueuePos(c);
@@ -1331,7 +1430,7 @@ export class Sim {
   }
   gainXp(yen) {
     const st = this.store;
-    const gx = Math.max(1, Math.round(yen / XP_YEN)); st.today.xp += gx;
+    const gx = xpOf(yen); st.today.xp += gx;
     if (st.level < MAX_LEVEL) st.xp += gx;
     while (st.level < MAX_LEVEL && st.xp >= xpNeed(st.level)) {
       st.xp -= xpNeed(st.level); st.level++;
@@ -1400,6 +1499,7 @@ export class Sim {
       const j = rt.pj;
       if (j?.pid && PRODUCTS[j.pid]) { const v = priceLimit(st, j.pid); if (getPrice(st, j.pid) !== v) { st.prices[j.pid] = v; this.sfx('stock', rt.x, rt.z); this.bump(); } }
       if (j?.cid && CARDS[j.cid]) { const v = cardLimit(st, j.cid); if (cardPrice(st, j.cid) !== v) { st.cprices[j.cid] = v; this.sfx('stock', rt.x, rt.z); this.bump(); } }
+      if (j?.play) { const v = playLimit(st); if (st.playFee !== v) { st.playFee = v; this.sfx('stock', rt.x, rt.z); this.bump(); } }
       rt.st = 'idle'; rt.t = 0.25; rt.pj = null; rt.an = 'idle';
       return;
     }
@@ -1417,6 +1517,8 @@ export class Sim {
     for (const f of st.fixtures) {
       if (f.s) f.s.forEach((sl, si) => { const pid = sl[0]; if (!pid || !PRODUCTS[pid] || getPrice(st, pid) === priceLimit(st, pid)) return; const [ax, az] = slotAccess(f, si); consider('p:' + pid, f, ax, az, { pid }); });
       if (f.cs) f.cs.forEach((cid, ci) => { if (!cid || !CARDS[cid] || cardPrice(st, cid) === cardLimit(st, cid)) return; const [ax, az] = cardAccess(f, ci); consider('c:' + cid, f, ax, az, { cid }); });
+      // プレイテーブルの料金も「ギリギリ遊んでくれる料金」に直す
+      if (FIXTURES[f.t].seats && st.playFee !== playLimit(st)) { const [ax, az] = seatSpot(f, 0); consider('play', f, ax, az, { play: 1 }); }
     }
     return best;
   }
@@ -1671,11 +1773,14 @@ export class Sim {
     const st = this.store;
     const wages = st.staff.reduce((s, o) => s + (o.wage || 0), 0);
     const bills = 500 + st.fixtures.length * 60;
-    st.money -= wages + bills;
+    // 対戦イベントの運営費（プレイテーブルがあるときだけ。お客さんが来なくてもかかる）
+    const fmt = playFmtOf(st), hasTable = st.fixtures.some((f) => FIXTURES[f.t].seats);
+    const event = hasTable ? fmt.cost : 0;
+    st.money -= wages + bills + event;
     const top = Object.entries(st.today.items || {}).sort((a, b) => b[1][1] - a[1][1]).slice(0, 6);
     const T = st.today;
-    const data = { top, prevProfit: st.last?.profit ?? null, day: st.day, recycle: T.recycle || 0, sales: T.sales, served: T.served, lost: T.lost, orders: T.orders, ship: T.ship || 0, wages, bills, vend: T.vend, xp: T.xp, level: st.level, rep: Math.round(st.rep), repPrev: st.last?.rep ?? null, rv: T.rv || [0, 0, 0, 0, 0], money: st.money, cardSales: T.cardSales || 0, playSales: T.playSales || 0, buyback: T.buyback || 0, packs: T.packs || 0, lic: T.lic || 0, smelly: T.smelly || 0, cleaned: T.cleaned || 0, smellLost: T.smellLost || 0 };
-    data.profit = data.sales + data.vend + data.recycle + data.buyback - data.orders - data.ship - wages - bills;
+    const data = { top, prevProfit: st.last?.profit ?? null, day: st.day, recycle: T.recycle || 0, sales: T.sales, served: T.served, lost: T.lost, orders: T.orders, ship: T.ship || 0, wages, bills, vend: T.vend, xp: T.xp, level: st.level, rep: Math.round(st.rep), repPrev: st.last?.rep ?? null, rv: T.rv || [0, 0, 0, 0, 0], money: st.money, cardSales: T.cardSales || 0, playSales: T.playSales || 0, played: T.played || 0, playMin: T.playMin || 0, event, fmt: hasTable ? fmt.id : null, buyback: T.buyback || 0, packs: T.packs || 0, lic: T.lic || 0, smelly: T.smelly || 0, cleaned: T.cleaned || 0, smellLost: T.smellLost || 0 };
+    data.profit = data.sales + data.vend + data.recycle + data.buyback - data.orders - data.ship - wages - bills - event;
     st.phase = 'summary'; st.last = data;
     for (const fid in this.dyn.regs) this.resetReg(+fid, true);
     this.dyn.seats = {};

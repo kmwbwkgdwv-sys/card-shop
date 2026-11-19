@@ -310,9 +310,9 @@ export const FIXTURES = {
     cards: cardGrid(6, 4, -0.75, 0.3, [0.62, 0.92, 1.22, 1.52], [0.1, 0.1, 0.1, 0.1], 0.08), desc: '背の高いガラスケース（24枚・お客さんが増える）' }),
   // ---- 対戦 ----
   playtable: F({ name: 'プレイテーブル', cat: 'play', icon: '🎮', price: 3000, w: 1.5, d: 1, place: 'sales', lv: 2,
-    seats: [[0, 0.82], [0, -0.82]], desc: 'お客さんがカードで対戦する（2人）。遊んだお客さんはレジでプレイ料金を払う' }),
+    seats: [[0, 0.82], [0, -0.82]], pairs: [[0, 1]], desc: 'お客さんが2人で対戦する。ゲームが終わるとその場でプレイ料金（1時間あたり）を払ってくれる' }),
   tourtable: F({ name: '大会用テーブル', cat: 'play', icon: '🏟️', price: 25000, w: 2.5, d: 1, place: 'sales', lv: 45, attract: 0.04,
-    seats: [[-0.6, 0.82], [0.6, 0.82], [-0.6, -0.82], [0.6, -0.82]], desc: '4人で遊べる大きな対戦テーブル' }),
+    seats: [[-0.6, 0.82], [0.6, 0.82], [-0.6, -0.82], [0.6, -0.82]], pairs: [[0, 2], [1, 3]], desc: '2組（4人）が同時に対戦できる大きなテーブル（お客さんが増える）' }),
   // ---- レジ ----
   checkout: F({ name: 'レジカウンター', cat: 'checkout', icon: '🧾', price: 12000, w: 1, d: 2.5, place: 'sales', lv: 1,
     op: [-0.85, -0.45], cust: [0.85, -0.25], q0: 0.85, qStep: 0.8, desc: 'お客さんの会計をする' }),
@@ -549,8 +549,18 @@ export const STAFF_NAMES = ['たなか', 'すずき', 'さとう', 'やまだ', 
 // ---------- お店のレベル（最大50） ----------
 // スキルボードはなし。商品・設備・従業員・レジの台数はレベルで増える
 export const MAX_LEVEL = 50;
-export const XP_YEN = 50; // 売上 ¥50 につき経験値1
-export function xpNeed(level) { return Math.round((180 * Math.pow(1.09, level - 1) + 120 * (level - 1)) / 10) * 10; }
+export const XP_YEN = 50; // （前の版の名残り）
+// 経験値：お会計1回ごとに √金額 ÷ 4（高い買い物ほど多いけど、売上に比例はしない → 高いレベルほど上がりにくい）
+export const xpOf = (yen) => Math.max(1, Math.round(Math.sqrt(Math.max(0, yen)) / 4));
+// 次のレベルまでに必要な経験値。棚をいっぱいにして営業したとき、Lv.1 は0.6日・Lv.10 は1日・Lv.20 は1.4日・Lv.40 は2日くらいで上がる
+// （ふつうに遊ぶとこの1.5〜2倍。Lv.50 まで100日以上かかる）
+const XP_LV = [[1, 120], [3, 250], [5, 400], [8, 750], [10, 950], [15, 1600], [20, 3000], [25, 5200], [30, 6500], [35, 8000], [40, 11000], [45, 12500], [49, 14000]];
+export function xpNeed(level) {
+  const L = Math.min(49, Math.max(1, level || 1));
+  let i = 0; while (i < XP_LV.length - 2 && XP_LV[i + 1][0] < L) i++;
+  const [l0, v0] = XP_LV[i], [l1, v1] = XP_LV[i + 1], t = Math.min(1, Math.max(0, (L - l0) / (l1 - l0)));
+  return Math.round(Math.exp(Math.log(v0) + (Math.log(v1) - Math.log(v0)) * t) / 10) * 10;
+}
 export function checkoutLimit(level) { return level >= 35 ? 6 : level >= 25 ? 4 : level >= 15 ? 3 : level >= 6 ? 2 : 1; }
 export const CHECKOUT_LV = [[6, 2], [15, 3], [25, 4], [35, 6]];
 export function productUnlocked(pid, level) { const p = PRODUCTS[pid]; return !!p && !p.hidden && (level || 1) >= (p.lv || 1); }
@@ -565,14 +575,39 @@ export function unlocksAt(lv) {
   for (const [, f] of Object.entries(FIXTURES)) if (!f.fixed && f.lv === lv && lv > 1) out.push({ k: 'fx', icon: f.icon, name: f.name });
   for (const s of STAFF_SLOTS) if (s.lv === lv) out.push({ k: 'staff', icon: SPEEDS[Math.max(s.reg, s.stk)].icon, name: `従業員 No.${s.no} の雇用ライセンス ¥${s.lic.toLocaleString()}（🧾レジ:${SPEEDS[s.reg].name}・📦品出し:${SPEEDS[s.stk].name}）` });
   for (const [l, n] of CHECKOUT_LV) if (l === lv) out.push({ k: 'reg', icon: '🧾', name: `レジを${n}台まで置ける` });
+  for (const f of PLAY_FORMATS) if (f.lv === lv && lv > 2) out.push({ k: 'fmt', icon: f.icon, name: `対戦イベント「${f.name}」（対戦したお客さん${f.need}人で開催できる）` });
   return out;
 }
 // ハーフ箱：中身が半分の箱（値段も半分。送料は同じ）
 export const halfQty = (pid) => Math.ceil(PRODUCTS[pid].qty / 2);
 export const boxUnits = (pid, half) => (half ? halfQty(pid) : PRODUCTS[pid].qty);
 export function closeTime() { return CLOSE_TIME; }
-export const PLAY_FEE = 300; // プレイテーブルの利用料（はじめ）
-export const PLAY_FEE_MAX = 500; // これより高いと遊んでくれない
+// ===== 対戦イベント（原作の「TCG Event」）=====
+// パソコンで形式をえらぶと、プレイテーブルで対戦したお客さんが「1時間あたりの料金」を遊んだ時間ぶん払う（ゲームが終わるとその場で自動）。
+// 形式は「お店のレベル」と「これまでに対戦したお客さんの人数」で解放。上の形式ほど料金が高く、毎日の運営費がかかる。
+// 開いた形式によって、つぎの日のカード相場が上がる物・下がる物がある（up/down）
+export const PLAY_FORMATS = [
+  { id: 'free', name: 'フリー対戦', icon: '🎲', lv: 2, need: 0, cost: 0, fee: 300, pop: 1, up: { rand: 1 }, down: { rand: 1 }, eff: 'ランダムなレア度が上がったり下がったり' },
+  { id: 'normal', name: 'ノーマル限定戦', icon: '⚪', lv: 5, need: 10, cost: 4000, fee: 600, pop: 1.04, up: { r: ['N', 'R'] }, down: { r: ['SR', 'SSR', 'HR', 'UR'] }, eff: 'N・Rが上がる／SR以上が下がる' },
+  { id: 'fire', name: '炎カップ', icon: '🔥', lv: 8, need: 30, cost: 8000, fee: 1000, pop: 1.08, up: { t: 'fire' }, down: { t: 'grass' }, eff: '炎タイプが上がる／草タイプが下がる' },
+  { id: 'water', name: '水カップ', icon: '💧', lv: 10, need: 50, cost: 8000, fee: 1000, pop: 1.08, up: { t: 'water' }, down: { t: 'fire' }, eff: '水タイプが上がる／炎タイプが下がる' },
+  { id: 'grass', name: '草カップ', icon: '🌿', lv: 12, need: 80, cost: 8000, fee: 1000, pop: 1.08, up: { t: 'grass' }, down: { t: 'water' }, eff: '草タイプが上がる／水タイプが下がる' },
+  { id: 'elec', name: '雷カップ', icon: '⚡', lv: 14, need: 110, cost: 8000, fee: 1000, pop: 1.08, up: { t: 'electric' }, down: { t: 'flying' }, eff: '電気タイプが上がる／飛行タイプが下がる' },
+  { id: 'classic', name: 'クラシック杯', icon: '📜', lv: 18, need: 200, cost: 18000, fee: 2000, pop: 1.12, up: { s: [1, 2] }, down: { s: [7, 8] }, eff: '昔の弾（AM1・AM2）が上がる／新しい弾（AM7・AM8）が下がる' },
+  { id: 'silver', name: 'シルバーレガシー', icon: '🥈', lv: 22, need: 300, cost: 30000, fee: 3000, pop: 1.15, up: { r: ['SR'] }, down: { r: ['N', 'R'] }, eff: 'SRが上がる／N・Rが下がる' },
+  { id: 'gold', name: 'ゴールドスター', icon: '🥇', lv: 27, need: 500, cost: 45000, fee: 4000, pop: 1.18, up: { r: ['SSR'] }, down: { r: ['SR'] }, eff: 'SSRが上がる／SRが下がる' },
+  { id: 'rainbow', name: 'レインボーバトル', icon: '🌈', lv: 32, need: 700, cost: 60000, fee: 5000, pop: 1.22, up: { r: ['HR'] }, down: { r: ['SSR'] }, eff: 'HRが上がる／SSRが下がる' },
+  { id: 'ultimate', name: 'アルティメット杯', icon: '👑', lv: 38, need: 1000, cost: 85000, fee: 6500, pop: 1.26, up: { r: ['UR'] }, down: { r: ['HR'] }, eff: 'URが上がる／HRが下がる' },
+  { id: 'holo', name: 'キラキラヘブン', icon: '✨', lv: 45, need: 1500, cost: 120000, fee: 8000, pop: 1.3, up: { flash: 1 }, down: null, eff: 'フラッシュ（キラ）カードが全部上がる' },
+];
+export const PLAY_FORMAT = Object.fromEntries(PLAY_FORMATS.map((f) => [f.id, f]));
+export const PLAY_FEE = PLAY_FORMATS[0].fee; // はじめの料金（1時間あたり）
+export const PLAY_FEE_OK = 1.2; // 形式の基本料金の120%まではお客さんが遊んでくれる（商品と同じ）
+export const playFmtOf = (st) => PLAY_FORMAT[st?.playFmt] || PLAY_FORMATS[0];
+export const playLimit = (st) => Math.floor((playFmtOf(st).fee * PLAY_FEE_OK) / 10) * 10;
+export const fmtUnlocked = (st, f) => (st?.level || 1) >= f.lv && (st?.stats?.played || 0) >= f.need;
+// 遊んだ時間ぶんの料金（1時間あたり fee・10円単位）
+export const playCharge = (fee, min) => Math.max(0, Math.round((fee * min) / 60 / 10) * 10);
 // 相場（日ごとに上下する）
 export function marketPrice(store, pid) {
   const p = PRODUCTS[pid], m = store?.market?.[pid] ?? 1, v = p.price * m;

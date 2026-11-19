@@ -70,23 +70,48 @@ export function roundYen(v) {
 // 毎日の相場のゆれ（レア度の順番が入れかわらない幅にとどめる）
 export const CMK_MIN = 0.9, CMK_MAX = 1.12;
 const cmkOf = (m) => Math.min(CMK_MAX, Math.max(CMK_MIN, m ?? 1));
-export function cardValue(store, cid) { const c = CARDS[cid]; if (!c) return 0; if (c.flash) return roundYen(FLASH_MULT * cardValue(store, c.base)); return roundYen(c.v * cmkOf(store?.cmk?.[cid])); }
-export function cardValuePrev(store, cid) { const c = CARDS[cid]; if (!c) return null; if (c.flash) { const b = cardValuePrev(store, c.base); return b == null ? null : roundYen(FLASH_MULT * b); } const m = store?.cmkPrev?.[cid]; return m == null ? null : roundYen(c.v * cmkOf(m)); }
+// フラッシュ全体の相場（対戦イベント「キラキラヘブン」で上がる。1.00〜1.10）
+const FLASH_MK_MAX = 1.1;
+const fmkOf = (m) => Math.min(FLASH_MK_MAX, Math.max(1, m ?? 1));
+export function cardValue(store, cid) { const c = CARDS[cid]; if (!c) return 0; if (c.flash) return roundYen(FLASH_MULT * fmkOf(store?.cmk?._flash) * cardValue(store, c.base)); return roundYen(c.v * cmkOf(store?.cmk?.[cid])); }
+export function cardValuePrev(store, cid) { const c = CARDS[cid]; if (!c) return null; if (c.flash) { const b = cardValuePrev(store, c.base); return b == null ? null : roundYen(FLASH_MULT * fmkOf(store?.cmkPrev?._flash ?? store?.cmk?._flash) * b); } const m = store?.cmkPrev?.[cid]; return m == null ? null : roundYen(c.v * cmkOf(m)); }
+// 対戦イベントの条件を文字にする（例：「炎タイプ」「SR」「AM1・AM2」「フラッシュ」）
+export function fmtTargetText(d) {
+  if (!d) return '';
+  if (d.r) return d.r.join('・');
+  if (d.t) return typeJA(d.t) + 'タイプ';
+  if (d.s) return d.s.map((n) => SERIES_BY[n]?.code || 'AM' + n).join('・');
+  if (d.flash) return 'フラッシュ';
+  return '';
+}
+// 対戦イベントの条件にカードが当てはまるか（{r:[レア度]}, {t:タイプ}, {s:[弾]}）
+export function fmtMatch(c, d) {
+  if (!d || !c) return false;
+  if (d.r) return d.r.includes(c.r);
+  if (d.t) return (c.types || []).includes(d.t);
+  if (d.s) return d.s.includes(c.s);
+  return false;
+}
 export const CARD_OK = 1.2; // 相場の+20%までなら買ってもらえる
 export const cardLimit = (store, cid) => Math.floor(cardValue(store, cid) * CARD_OK);
 export const cardPrice = (store, cid) => store?.cprices?.[cid] ?? cardValue(store, cid);
 export const BUYBACK = 0.12; // 業者買取は相場の12%（まとめて開けて売るだけでは、もうからない）
 export const buybackPrice = (store, cid) => Math.max(1, Math.floor(cardValue(store, cid) * BUYBACK));
 // 毎日の相場変動（平均へゆっくり戻るランダムウォーク）。レアほど大きく動く
-export function updateCardMarket(store, rnd = Math.random) {
+// ef: 前の日に開いた対戦イベントの影響 { up, down }（当てはまるカードの相場が上がる／下がる）
+export const FMT_PUSH = 0.04;
+export function updateCardMarket(store, rnd = Math.random, ef = null) {
   store.cmk ||= {}; store.cmkPrev = {};
   for (const c of CARDS_LIST) {
     const m = store.cmk[c.id] ?? 1;
     store.cmkPrev[c.id] = m;
     const vol = [0.02, 0.025, 0.03, 0.035, 0.04, 0.045][rarityOrder(c.r)];
-    const g = (rnd() + rnd() + rnd() - 1.5) * vol;
+    let g = (rnd() + rnd() + rnd() - 1.5) * vol;
+    if (ef) { if (fmtMatch(c, ef.up)) g += FMT_PUSH; else if (fmtMatch(c, ef.down)) g -= FMT_PUSH; }
     store.cmk[c.id] = +Math.min(CMK_MAX, Math.max(CMK_MIN, 1 + (cmkOf(m) - 1) * 0.8 + g)).toFixed(3);
   }
+  const fm = store.cmk._flash ?? 1; store.cmkPrev._flash = fm;
+  store.cmk._flash = +fmkOf(1 + (fmkOf(fm) - 1) * 0.7 + (ef?.up?.flash ? 0.035 : 0)).toFixed(3);
 }
 // コレクション
 export function ownedCount(store, cid) { return store?.cards?.[cid] || 0; }

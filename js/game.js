@@ -3,7 +3,8 @@ import * as THREE from 'three';
 import { Sim, normalizeStore, getPrice, priceLimit, fitPlacement, handPid, HAND_MAX } from './sim.js';
 import { FIXTURES, PRODUCTS, boxProd, PLAYER_BOUNDS, PLAYER_SPAWN, BUILDING, MANAGER, STAFF_ROLES, TRASH_TYPES, DELIVERY_AREA, marketPrice, getWalls, fixtureFootprint, snapFixture, worldToLocal, pickSlot, pickBoxSlot,
   checkoutSpot, localToWorld, slotCapacity, pickTag, tagLocal, isPack, isBoosterBox, isSpray, pickCardSlot, canPlace } from './data.js';
-import { CARDS, RARITY, cardValue, cardPrice, cardLimit, rarityOrder, seriesOfProduct, isHit } from './cards.js';
+import { CARDS, RARITY, cardValue, cardPrice, cardLimit, rarityOrder, seriesOfProduct, isHit, fmtTargetText } from './cards.js';
+import { PLAY_FORMAT, playFmtOf } from './data.js';
 import { clamp, yen, dist, angleLerp, lerp } from './util.js';
 import { toast, h, modal, confirmBox } from './ui.js';
 import { sanitizeAvatar } from './models/character.js';
@@ -155,6 +156,16 @@ export class Game {
         this.ui.closeSummary(); toast(`☀️ ${e.day}日目の朝！準備ができたら入口の看板をOPENにしよう`, 'ok', 3600);
         const news = [e.up && PRODUCTS[e.up[0]] ? `${PRODUCTS[e.up[0]].icon}${PRODUCTS[e.up[0]].name} ▲${e.up[1]}%` : '', e.down && PRODUCTS[e.down[0]] ? `${PRODUCTS[e.down[0]].icon}${PRODUCTS[e.down[0]].name} ▼${e.down[1]}%` : '', e.cup && CARDS[e.cup[0]] ? `🃏${CARDS[e.cup[0]].name}(${CARDS[e.cup[0]].r}) ▲${e.cup[1]}%` : ''].filter(Boolean);
         if (news.length) setTimeout(() => toast('📈 今日の相場：' + news.join('　'), '', 4200), 900);
+        if (e.fe && PLAY_FORMAT[e.fe.id]) {
+          const f = PLAY_FORMAT[e.fe.id], up = fmtTargetText(e.fe.up), dn = fmtTargetText(e.fe.down);
+          setTimeout(() => toast(`${f.icon} きのうの「${f.name}」の影響で、${up ? `${up}のカードが値上がり` : ''}${up && dn ? '・' : ''}${dn ? `${dn}が値下がり` : ''}しました`, '', 4600), 2600);
+        }
+        break;
+      }
+      case 'playpay': {
+        // 2人ぶんの料金をまとめて知らせる
+        this._pp = (this._pp || 0) + e.total; clearTimeout(this._ppT);
+        this._ppT = setTimeout(() => { toast(`🎮 対戦おわり！プレイ料金 +${yen(this._pp)}`, 'money', 1800); this._pp = 0; }, 200);
         break;
       }
       case 'sale': if (e.who === me) toast(`💴 +${yen(e.total)}`, 'money', 1400); break;
@@ -565,8 +576,9 @@ export class Game {
       return A;
     }
     if (def.seats) {
-      A.info = `${def.icon} ${def.name}（${def.seats.length}人用）<br>プレイ料金 <b>${yen(st.playFee ?? 0)}</b>（パソコンの「お店」で変更）`;
-      A.hint = 'お客さんがここで対戦して、レジでプレイ料金を払います';
+      const fm = playFmtOf(st);
+      A.info = `${def.icon} ${def.name}（${def.seats.length}人用）<br>${fm.icon} イベント「${fm.name}」・料金 <b>1時間 ${yen(st.playFee ?? 0)}</b>（パソコンの「イベント」で変更）`;
+      A.hint = 'お客さんが2人そろうと対戦して、終わるとその場でプレイ料金を払ってくれます';
       return A;
     }
     if (def.slots && t.ti >= 0) {
@@ -867,7 +879,7 @@ export class Game {
       ['🃏', 'シングルカード棚やカードテーブルを狙って「カードを置く」→ コレクションファイルから選んで並べると売れる。値段は相場の+20%まで'],
       ['🤢', 'ときどき臭いお客さん（緑のもやもや）が来る。近くのお客さんがイヤがって帰ってしまうので、消臭スプレーを手に持って長押しで「シューッ」。2秒くらい吹きかけると臭いが消える。画面のゲージが0になるとスプレーはなくなる（1本で3人くらい）'],
       ['🌬️', '消臭スプレーは仕入れて売ることも、自分で使うこともできる。Lv.5からオートセント（自動消臭機）が買えて、スプレーをセットすると自動で消臭（Lv.18・Lv.40でスプレーの間隔が短い機種が出る）'],
-      ['🎮', 'プレイテーブルを置くと、お客さんが対戦してレジでプレイ料金を払ってくれる（料金はパソコンの「お店」で変更）'],
+      ['🎮', 'プレイテーブルを置くと、お客さんが2人で対戦して、終わるとその場で料金（1時間あたり×遊んだ時間）を払ってくれる。パソコンの「イベント」で形式と料金を決めよう（対戦した人数が増えると上の形式が開催できる）'],
       ['🏷️', '倉庫棚の段には「ラベル」を貼れる。品出しは、ラベルの貼ってある段にだけその商品を置く（ラベルがないと外の段ボールを片付けない）'],
       ['🧑‍💼', '従業員はだれでもレジと品出しの両方ができるが、人によって得意さ（とても遅い〜とても早い）がちがう。「🔄両方」にすると、レジに並んだらレジへ、空いたら品出し。Lv.5から、🔑雇用ライセンスを買って雇える（最大10人）'],
       ['🏷️', '従業員を「値段係」にすると、相場が変わるたびに棚を回って、商品とシングルカードの値段を「ギリギリ売れる値段」（相場の+20%）に直してくれる'],

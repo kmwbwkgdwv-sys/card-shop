@@ -266,7 +266,7 @@ export function openSettings(app, { inGame = false, onClose } = {}) {
   const save = () => app.applySettings();
   const modeText = () => (s.soundMode === 'solo'
     ? '🔔 マナーモード中でも鳴ります。そのかわり Spotify などほかのアプリの音楽は止まります。'
-    : '🎧 Spotify などの音楽を止めずに、ゲームの音もいっしょに鳴ります（iPhoneはマナーモード（消音）を切ると聞こえます）。');
+    : '🎧 Spotify などの音楽を止めずに、ゲームの音もいっしょに鳴ります。iPhone はマナーモード（消音）のあいだゲームの音が消えるので、マナーモードを切ってください（iPhone の仕組みで「マナーモードでも鳴らす」と「ほかのアプリと一緒に」は同時に選べません）。');
   const modeNote = h('p', { class: 'muted small' }, modeText());
   const sw = (key, label, after) => { const c = h('input', { type: 'checkbox' }); c.checked = !!s[key]; c.onchange = () => { s[key] = c.checked; save(); after && after(); }; return h('label', { class: 'set-row' }, h('span', {}, label), h('span', { class: 'switch' }, c, h('i'))); };
   const slider = (key, label, min, max, step, fmt = (v) => v) => {

@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { Renderer, avatarPreview } from './render.js';
 import { Character, randomAvatar, sanitizeAvatar } from './models/character.js';
 import { Input } from './input.js';
-import { Music, Sfx } from './audio.js';
+import { Music, Sfx, isIOS } from './audio.js';
 import { Cloud, FirebaseRoom, LocalRoom } from './net.js';
 import { loadSettings, saveSettings, loadProfile, createProfile, saveProfileLocal, syncUp, syncDown, restoreByCode, rankEntry, listOwnStores, switchStore } from './save.js';
 import { setArtBase, fontsReady, preloadArt } from './cardart.js';
@@ -36,7 +36,10 @@ class App {
         if (screen.orientation && screen.orientation.lock) await screen.orientation.lock('landscape');
       } catch (e) { /* iPhoneなどは非対応：縦向きのときは案内を表示 */ }
     };
-    const unlock = () => { this.sfx.unlock(); if (!this.music.unlocked) this.music.unlock(); lockLandscape(); };
+    const unlock = () => {
+      this.sfx.unlock(); if (!this.music.unlocked) { this.music.unlock(); this.mixHint(); }
+      lockLandscape();
+    };
     window.addEventListener('pointerdown', unlock, { capture: true });
     window.addEventListener('keydown', unlock, { capture: true });
     bootMsg('カードを準備中…', 50);
@@ -104,6 +107,13 @@ class App {
     const down = (x) => { if (this.mode === 'editor') last = x; };
     const move = (x) => { if (last != null && this.mode === 'editor') { this.previewYaw += (x - last) * 0.012; last = x; } };
     c.addEventListener('pointerdown', (e) => down(e.clientX)); window.addEventListener('pointermove', (e) => move(e.clientX)); window.addEventListener('pointerup', () => { last = null; });
+  }
+  // iPhone：Spotify などと一緒に鳴らすときは、マナーモード（消音）だとゲームの音が消えるので一度だけ案内する
+  mixHint() {
+    const s = this.settings;
+    if (!isIOS() || s.soundMode === 'solo' || s.__mixHint) return;
+    s.__mixHint = true; saveSettings(s);
+    setTimeout(() => toast('🎧 Spotify などの音楽を止めずに、ゲームの音もいっしょに鳴ります。ゲームの音が聞こえないときは iPhone のマナーモード（消音）を切ってね', 'info', 6500), 1200);
   }
   applySettings() {
     saveSettings(this.settings);

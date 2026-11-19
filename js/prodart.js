@@ -20,7 +20,9 @@ const MULTI = { figure3: ['チュピ', 'ケロッタ', 'セリック'], badge: [
 const keysOf = (pid) => (MULTI[pid] || (MON[pid] ? [MON[pid]] : [])).map(monArt).filter(Boolean);
 
 // ---------- 描画の道具（100×100 の座標） ----------
+let NOSH = false; // 3Dの面を描くときは影なし
 function shadow(g, cx, cy, rx, ry = rx * 0.2) {
+  if (NOSH) return;
   g.save(); g.translate(cx, cy); g.scale(1, ry / rx);
   const gr = g.createRadialGradient(0, 0, 0, 0, 0, rx); gr.addColorStop(0, 'rgba(0,0,0,0.3)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
   g.fillStyle = gr; g.beginPath(); g.arc(0, 0, rx, 0, 7); g.fill(); g.restore();
@@ -80,6 +82,42 @@ function sparkle(g, x, y, r, col = '#fff') {
   g.fill(); g.restore();
 }
 const RAINBOW = ['#ff5f6d', '#ffc371', '#fff36b', '#6bff9e', '#5fd4ff', '#a17bff'];
+// プレイマットの面（2Dの絵と3Dの丸めたマットで共通）
+function matSurface(g, p, A, x0, y0, w, h) {
+  const c = p.color, sx = w / 100, sy = h / 42;
+  g.save(); g.translate(x0, y0); g.scale(sx, sy);
+  if (p.id === 'playmatS') {
+    g.fillStyle = lin(g, 0, 0, 0, 42, [['#1a1440', 0], ['#3a2a7a', 1]]); g.fillRect(-2, -2, 104, 46);
+    for (let i = 0; i < 40; i++) { g.fillStyle = `rgba(255,255,255,${0.4 + (i % 5) * 0.12})`; g.fillRect((i * 37) % 100, (i * 53) % 42, 0.9, 0.9); }
+    sparkle(g, 70, 12, 5, '#fff6c8'); sparkle(g, 30, 26, 3.5, '#fff6c8');
+  } else {
+    g.fillStyle = lin(g, 0, 0, 0, 42, [[L(c, 0.25), 0], [D(c, 0.12), 1]]); g.fillRect(-2, -2, 104, 46);
+    if (p.id === 'playmatW') { g.strokeStyle = 'rgba(255,255,255,0.35)'; g.lineWidth = 1.4; for (let y = 8; y < 44; y += 7) { g.beginPath(); for (let x = 0; x <= 100; x += 4) g.lineTo(x, y + Math.sin(x / 6 + y) * 1.6); g.stroke(); } }
+  }
+  if (A[0]) pic(g, A[0], 30, 0, 40, 42, true);
+  else if (p.id !== 'playmatS') { // ふつうのプレイマット：カードを置く場所の線
+    g.strokeStyle = 'rgba(255,255,255,0.55)'; g.lineWidth = 0.9;
+    for (let i = 0; i < 5; i++) { const x = 18 + i * 14 + (i - 2) * 0.8; g.strokeRect(x, 22, 10, 13); }
+    g.strokeRect(42, 6, 14, 12);
+  }
+  g.restore();
+}
+// 缶バッジ1つ（2Dの絵と3Dで共通）
+function canBadge(g, cx, cy, r, im, col) {
+  g.beginPath(); g.arc(cx, cy + 1.6, r, 0, 7); g.fillStyle = 'rgba(0,0,0,0.25)'; if (!NOSH) g.fill();
+  g.beginPath(); g.arc(cx, cy, r, 0, 7); g.fillStyle = '#c9cfd6'; g.fill();
+  g.save(); g.beginPath(); g.arc(cx, cy, r - 1.4, 0, 7); g.clip(); g.fillStyle = lin(g, 0, cy - r, 0, cy + r, [[L(col, 0.35), 0], [col, 1]]); g.fillRect(cx - r, cy - r, r * 2, r * 2); pic(g, im, cx - r * 0.8, cy - r * 0.8, r * 1.6, r * 1.6, true);
+  g.fillStyle = 'rgba(255,255,255,0.35)'; g.beginPath(); g.ellipse(cx - r * 0.35, cy - r * 0.45, r * 0.45, r * 0.25, -0.5, 0, 7); g.fill(); g.restore();
+}
+const BADGE_COL = ['#ffd84a', '#ff8a65', '#4fc3f7'];
+// ぬいぐるみのタグ
+function plushTag(g, x, y, rot, k = 1) {
+  g.save(); g.translate(x, y); g.rotate(rot); g.scale(k, k);
+  rr(g, -6, -3, 13, 16, 2); g.fillStyle = '#fff'; g.fill(); g.strokeStyle = '#e0e0e0'; g.lineWidth = 0.5; g.stroke();
+  g.fillStyle = '#e53935'; g.beginPath(); g.moveTo(0.5, 7); g.bezierCurveTo(-5, 3, -2, -1.5, 0.5, 1.5); g.bezierCurveTo(3, -1.5, 6, 3, 0.5, 7); g.fill();
+  txt(g, 'ANIMON', 0.5, 10.5, 2.2, '#e53935');
+  g.restore();
+}
 
 // ---------- 商品の種類ごとの絵 ----------
 const DRAW = {
@@ -167,20 +205,7 @@ const DRAW = {
     shadow(g, 50, 86, 44, 8);
     const q = [[12, 36], [88, 36], [97, 78], [3, 78]];
     g.save(); poly(g, q); g.clip();
-    if (p.id === 'playmatS') {
-      g.fillStyle = lin(g, 0, 36, 0, 78, [['#1a1440', 0], ['#3a2a7a', 1]]); g.fillRect(0, 30, 100, 50);
-      for (let i = 0; i < 40; i++) { g.fillStyle = `rgba(255,255,255,${0.4 + (i % 5) * 0.12})`; g.fillRect((i * 37) % 100, 36 + (i * 53) % 42, 0.9, 0.9); }
-      sparkle(g, 70, 48, 5, '#fff6c8'); sparkle(g, 30, 62, 3.5, '#fff6c8');
-    } else {
-      g.fillStyle = lin(g, 0, 36, 0, 78, [[L(c, 0.25), 0], [D(c, 0.12), 1]]); g.fillRect(0, 30, 100, 50);
-      if (p.id === 'playmatW') { g.strokeStyle = 'rgba(255,255,255,0.35)'; g.lineWidth = 1.4; for (let y = 44; y < 80; y += 7) { g.beginPath(); for (let x = 0; x <= 100; x += 4) g.lineTo(x, y + Math.sin(x / 6 + y) * 1.6); g.stroke(); } }
-    }
-    if (A[0]) pic(g, A[0], 30, 36, 40, 42, true);
-    else { // ふつうのプレイマット：カードを置く場所の線
-      g.strokeStyle = 'rgba(255,255,255,0.55)'; g.lineWidth = 0.9;
-      for (let i = 0; i < 5; i++) { const x = 18 + i * 14 + (i - 2) * 0.8; g.strokeRect(x, 58, 10, 13); }
-      g.strokeRect(42, 42, 14, 12);
-    }
+    matSurface(g, p, A, 0, 36, 100, 42);
     g.restore();
     poly(g, q); g.strokeStyle = D(c, 0.35); g.lineWidth = 1.6; g.stroke();
     // 丸めたマット（奥）
@@ -296,14 +321,8 @@ const DRAW = {
       return;
     }
     // 缶バッジ（ランダム：3つ）
-    const one = (cx, cy, r, im, col) => {
-      g.beginPath(); g.arc(cx, cy + 1.6, r, 0, 7); g.fillStyle = 'rgba(0,0,0,0.25)'; g.fill();
-      g.beginPath(); g.arc(cx, cy, r, 0, 7); g.fillStyle = '#c9cfd6'; g.fill();
-      g.save(); g.beginPath(); g.arc(cx, cy, r - 1.4, 0, 7); g.clip(); g.fillStyle = lin(g, 0, cy - r, 0, cy + r, [[L(col, 0.35), 0], [col, 1]]); g.fillRect(cx - r, cy - r, r * 2, r * 2); pic(g, im, cx - r * 0.8, cy - r * 0.8, r * 1.6, r * 1.6, true);
-      g.fillStyle = 'rgba(255,255,255,0.35)'; g.beginPath(); g.ellipse(cx - r * 0.35, cy - r * 0.45, r * 0.45, r * 0.25, -0.5, 0, 7); g.fill(); g.restore();
-    };
     shadow(g, 50, 90, 38);
-    one(30, 62, 19, A[1], '#ff8a65'); one(70, 62, 19, A[2], '#4fc3f7'); one(50, 38, 22, A[0], '#ffd84a');
+    canBadge(g, 30, 62, 19, A[1], BADGE_COL[1]); canBadge(g, 70, 62, 19, A[2], BADGE_COL[2]); canBadge(g, 50, 38, 22, A[0], BADGE_COL[0]);
   },
   plush(g, p, A) {
     if (p.id === 'cushion') {
@@ -316,12 +335,7 @@ const DRAW = {
     }
     shadow(g, 50, 92, 32);
     pic(g, A[0], 10, 6, 80, 86);
-    // ぬいぐるみのタグ
-    g.save(); g.translate(74, 70); g.rotate(0.25);
-    rr(g, -6, -3, 13, 16, 2); g.fillStyle = '#fff'; g.fill(); g.strokeStyle = '#e0e0e0'; g.lineWidth = 0.5; g.stroke();
-    g.fillStyle = '#e53935'; g.beginPath(); g.moveTo(0.5, 7); g.bezierCurveTo(-5, 3, -2, -1.5, 0.5, 1.5); g.bezierCurveTo(3, -1.5, 6, 3, 0.5, 7); g.fill();
-    txt(g, 'ANIMON', 0.5, 10.5, 2.2, '#e53935');
-    g.restore();
+    plushTag(g, 74, 70, 0.25);
   },
   mug(g, p, A) {
     shadow(g, 48, 90, 32);
@@ -399,30 +413,114 @@ const DRAW = {
   },
 };
 
+// ---------- 3Dモデル用の面 ----------
+// crop：2Dの絵のこの範囲（100×100の座標）をそのまま切り出す（影なし）
+const CROP = {
+  sleeve: [22, 8, 56, 84], deckcase: [22, 34, 46, 54], deckbox: [26, 18, 40, 70], manga: [25, 9, 48, 80],
+  binder: [18, 10, 60, 80], file9: [14, 10, 72, 80], storage: [22, 40, 46, 46], storageL: [14, 40, 62, 46],
+  snack: [14, 17, 72, 66], poster: [22, 8, 56, 82], cushion: [9, 19, 82, 70], boardgame: [12, 34, 66, 48], tshirt: [11, 10, 78, 80],
+};
+const BAND = { boardgame: [12, 40, 66, 14] }; // 平たい箱の正面の細い帯
+// 専用に描く面（横100の座標。高さは hu）
+const PIPS = { 1: [[0.5, 0.5]], 2: [[0.28, 0.28], [0.72, 0.72]], 3: [[0.25, 0.25], [0.5, 0.5], [0.75, 0.75]], 4: [[0.28, 0.28], [0.72, 0.28], [0.28, 0.72], [0.72, 0.72]], 5: [[0.25, 0.25], [0.75, 0.25], [0.5, 0.5], [0.25, 0.75], [0.75, 0.75]], 6: [[0.28, 0.22], [0.72, 0.22], [0.28, 0.5], [0.72, 0.5], [0.28, 0.78], [0.72, 0.78]] };
+const TOK = { 10: '#e53935', 50: '#1e88e5', 100: '#fbc02d' };
+export const DICE_COL = (p, die) => (p.id === 'dicegold' ? (die === 'a' ? '#e0b33c' : '#f2cf62') : die === 'a' ? p.color || '#e53935' : '#f5f5f5');
+const SPECIAL = {
+  mat: (g, p, A, hu) => matSurface(g, p, A, 0, 0, 100, hu),
+  mug: (g, p, A, hu) => {
+    g.fillStyle = lin(g, 0, 0, 100, 0, [['#e3e8ee', 0], ['#ffffff', 0.5], ['#e3e8ee', 1]]); g.fillRect(0, 0, 100, hu);
+    g.fillStyle = p.color || '#ffd84a'; g.fillRect(0, hu * 0.72, 100, hu * 0.28);
+    pic(g, A[0], 36, hu * 0.08, 28, hu * 0.62, true);
+    txt(g, 'ANIMON', 50, hu * 0.86, hu * 0.14, '#fff');
+  },
+  spray: (g, p, A, hu) => {
+    g.fillStyle = lin(g, 0, 0, 0, hu, [['#36c08a', 0], ['#1f8f63', 1]]); g.fillRect(0, 0, 100, hu);
+    txt(g, 'FRESH', 50, hu * 0.24, hu * 0.22, '#fff'); txt(g, '🌿', 50, hu * 0.55, hu * 0.3, '#000'); txt(g, '消臭', 50, hu * 0.84, hu * 0.18, '#fff', { f: BODY });
+  },
+  label: (g, p, A, hu) => { // 鑑定ケースのラベル
+    rr(g, 1, 1, 98, hu - 2, 6); g.fillStyle = '#fff'; g.fill(); g.strokeStyle = '#d33'; g.lineWidth = 2; g.stroke();
+    txt(g, 'GEM MINT', 34, hu * 0.36, hu * 0.3, '#c62828', { max: 56 }); txt(g, '10', 82, hu * 0.5, hu * 0.62, '#c62828');
+    txt(g, 'ANIMON CARD', 34, hu * 0.74, hu * 0.2, '#444', { f: BODY, max: 56 });
+  },
+  legend: (g, p, A, hu) => { rr(g, 0, 0, 100, hu, 6); g.fillStyle = lin(g, 0, 0, 0, hu, [['#f2cf62', 0], ['#c9a227', 1]]); g.fill(); txt(g, 'LEGEND', 50, hu / 2, hu * 0.6, '#3a2a00'); },
+  tag: (g) => plushTag(g, 50, 22, 0, 6),
+};
+function drawFace(g, p, A, face, hu) {
+  if (SPECIAL[face]) return SPECIAL[face](g, p, A, hu);
+  let m;
+  if ((m = /^pip([ab])(\d)$/.exec(face))) { // サイコロの面
+    const col = DICE_COL(p, m[1]), gold = p.id === 'dicegold';
+    g.fillStyle = col; g.fillRect(0, 0, 100, hu);
+    g.fillStyle = gold ? '#6b4a00' : m[1] === 'a' ? '#ffffff' : '#222222';
+    for (const [x, y] of PIPS[m[2]]) { g.beginPath(); g.arc(x * 100, y * hu, m[2] === '1' ? 13 : 9, 0, 7); g.fill(); }
+    return;
+  }
+  if ((m = /^tok(\d+)$/.exec(face))) { // ダメージカウンターの上の面（丸の外は透明）
+    const col = TOK[m[1]] || '#e53935';
+    g.beginPath(); g.arc(50, 50, 48, 0, 7); g.fillStyle = col; g.fill(); g.strokeStyle = 'rgba(255,255,255,0.75)'; g.lineWidth = 3; g.stroke();
+    txt(g, m[1], 50, 52, m[1].length > 2 ? 36 : 46, '#fff');
+    return;
+  }
+  if ((m = /^badge(\d)$/.exec(face))) { const i = +m[1]; canBadge(g, 50, 50, 48, A[i] || A[0], BADGE_COL[i % 3]); return; }
+  if ((m = /^(art|line|acr|sil)(\d)(?::(#[0-9a-f]{6}))?$/i.exec(face))) { // アニモンの絵（下ぞろえ・背景は透明）
+    const im = A[+m[2]] || A[0]; if (!im) return;
+    const k = m[1];
+    if (k === 'art') pic(g, im, 2, 2, 96, hu - 2);
+    else if (k === 'sil') pic(g, silhouette(im, m[3] || '#ffffff'), 2, 2, 96, hu - 2);
+    else { // ふちどり（キーホルダー：白、アクスタ：透明っぽい水色）
+      const s = silhouette(im, k === 'line' ? '#ffffff' : '#e6f3ff'), t = 3.2;
+      for (let a = 0; a < 16; a++) pic(g, s, 4 + Math.cos(a / 16 * 6.283) * t, 4 + Math.sin(a / 16 * 6.283) * t, 92, hu - 8);
+      pic(g, im, 4, 4, 92, hu - 8);
+    }
+    return;
+  }
+  const box = face === 'band' ? BAND[p.id] || BAND[p.model] : CROP[p.id] || CROP[p.model];
+  if (box) {
+    const [cx, cy, cw, ch] = box;
+    g.scale(100 / cw, hu / ch); g.translate(-cx, -cy);
+    NOSH = true; try { (DRAW[p.model] || fallback)(g, p, A); } finally { NOSH = false; }
+  }
+}
+// 面の絵の縦横比（切り出す範囲から）
+export function faceAspect(pid, face) {
+  const p = PRODUCTS[pid]; if (!p) return 1;
+  const b = face === 'band' ? BAND[p.id] || BAND[p.model] : CROP[p.id] || CROP[p.model];
+  return b ? b[3] / b[2] : 1;
+}
+
 // ---------- まとめ ----------
 const cache = new Map();
-export const hasProductArt = (pid) => { const p = PRODUCTS[pid]; return !!(p && !p.series && DRAW[p.model]); };
-// pid の絵のキャンバス（W×W・背景は透明）。絵が届いたら描き直して onReady を呼ぶ
-export function productCanvas(pid, W = 160, onReady) {
-  const p = PRODUCTS[pid]; if (!p) return null;
-  const k = pid + '|' + W;
-  let e = cache.get(k);
+// 共通：キャンバスを作って描き、アニモンの絵・フォントが届いたら描き直す（onDraw は描き直すたび、onReady はそろったとき1回）
+function entry(key, W, H, keys, paint, onReady, onDraw) {
+  let e = cache.get(key);
   if (!e) {
-    const cv = document.createElement('canvas'); cv.width = cv.height = W;
-    e = { cv, done: false, cbs: [] }; cache.set(k, e);
-    const keys = keysOf(pid);
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    e = { cv, done: false, cbs: [], draws: [] }; cache.set(key, e);
+    let fontsOk = false;
     const draw = () => {
       const A = keys.map((x) => artReady(x));
-      const g = cv.getContext('2d'); g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, W, W); g.scale(W / 100, W / 100);
-      try { (DRAW[p.model] || fallback)(g, p, A); } catch (err) { fallback(g, p); }
+      const g = cv.getContext('2d'); g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, W, H); g.scale(W / 100, W / 100);
+      try { paint(g, A, (H / W) * 100); } catch (err) { console.warn('商品の絵', key, err); }
+      for (const f of e.draws) { try { f(cv); } catch (er) { /* noop */ } }
       if (fontsOk && A.every(Boolean) && !e.done) { e.done = true; for (const f of e.cbs.splice(0)) { try { f(cv); } catch (er) { /* noop */ } } }
     };
-    let fontsOk = false;
     draw();
     for (const x of keys) loadArt(x).then(draw);
     fontsReady().then(() => { fontsOk = true; draw(); });
   }
+  if (onDraw) e.draws.push(onDraw);
   if (onReady) { if (e.done) onReady(e.cv); else e.cbs.push(onReady); }
   return e.cv;
+}
+// 3Dモデルの面のキャンバス（W×H・背景は透明）。描き直すたびに onDraw
+export function productFace(pid, face, W, H, onDraw) {
+  const p = PRODUCTS[pid]; if (!p) return null;
+  return entry(`${pid}|${face}|${W}x${H}`, W, H, keysOf(pid), (g, A, hu) => drawFace(g, p, A, face, hu), null, onDraw);
+}
+export const hasProductArt = (pid) => { const p = PRODUCTS[pid]; return !!(p && !p.series && DRAW[p.model]); };
+// pid の絵のキャンバス（W×W・背景は透明）。絵が届いたら描き直して onReady を呼ぶ
+export function productCanvas(pid, W = 160, onReady) {
+  const p = PRODUCTS[pid]; if (!p) return null;
+  return entry(pid + '|' + W, W, W, keysOf(pid), (g, A) => (DRAW[p.model] || fallback)(g, p, A), onReady);
 }
 function fallback(g, p) { txt(g, p.icon || '📦', 50, 52, 60, '#000'); }

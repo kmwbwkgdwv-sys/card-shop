@@ -551,7 +551,8 @@ export class Sim {
     this.releaseStaff(s);
     s.role = a.role;
     const msg = a.role === 'both' ? `${s.name}さんはレジと品出しの両方をおまかせにしました`
-      : `${s.name}さんを${role.name}にしました（はやさ：${SPEEDS[a.role === 'cashier' ? s.reg : s.stk].name}）`;
+      : a.role === 'pricer' ? `${s.name}さんを値段係にしました（棚の値段をいつもギリギリ売れる値段にします）`
+        : `${s.name}さんを${role.name}にしました（はやさ：${SPEEDS[a.role === 'cashier' ? s.reg : s.stk].name}）`;
     this.toast(null, msg, 'ok');
     this.bump();
   }
@@ -560,7 +561,7 @@ export class Sim {
     const b = this.heldBox(who);
     if (b) b.loc = { t: 'f', x: rt?.x ?? STAFF_HOME[0], y: this.stackHeight(rt?.x ?? STAFF_HOME[0], rt?.z ?? STAFF_HOME[1], b), z: rt?.z ?? STAFF_HOME[1], ry: 0 };
     for (const fid in this.dyn.regs) if (this.dyn.regs[fid].op === who) this.dyn.regs[fid].op = null;
-    if (rt) { rt.st = 'idle'; rt.t = 0.5; rt.path = null; rt.bid = null; rt.fid = null; rt.msg = null; rt.job = null; }
+    if (rt) { rt.st = 'idle'; rt.t = 0.5; rt.path = null; rt.bid = null; rt.fid = null; rt.msg = null; rt.job = null; rt.pj = null; }
   }
   a_fire(uid, a) {
     if (!this.atBoard(uid)) return this.err(uid, BOARD_ONLY);
@@ -1365,10 +1366,47 @@ export class Sim {
     const spd = 1.9 * k;
     if (rt.st !== 'idle' && rt.path && rt.pi < (rt.path?.length || 0)) rt.an = 'walk';
     if (job === 'cashier') return this.staffCashier(s, rt, dt, spd, who);
+    if (job === 'pricer') return this.staffPricer(s, rt, dt, spd, who);
     return this.staffStocker(s, rt, dt, spd, who);
   }
+  // 値段係：棚を回って、値段を「ギリギリ売れる値段」（相場の+20%）に直す。相場は毎日変わるので、朝いちばんに全部直す
+  staffPricer(s, rt, dt, spd, who) {
+    const st = this.store;
+    if (rt.st === 'topr') {
+      if (stepPath(rt, dt, spd)) {
+        rt.st = 'pricing'; rt.t = 1.1; rt.an = 'reach';
+        const f = this.fx(rt.fid); if (f) rt.ry = Math.atan2(f.x - rt.x, f.z - rt.z);
+      }
+      return;
+    }
+    if (rt.st === 'pricing') {
+      rt.t -= dt * Math.max(0.5, rt.k || 1);
+      if (rt.t > 0) return;
+      const j = rt.pj;
+      if (j?.pid && PRODUCTS[j.pid]) { const v = priceLimit(st, j.pid); if (getPrice(st, j.pid) !== v) { st.prices[j.pid] = v; this.sfx('stock', rt.x, rt.z); this.bump(); } }
+      if (j?.cid && CARDS[j.cid]) { const v = cardLimit(st, j.cid); if (cardPrice(st, j.cid) !== v) { st.cprices[j.cid] = v; this.sfx('stock', rt.x, rt.z); this.bump(); } }
+      rt.st = 'idle'; rt.t = 0.25; rt.pj = null; rt.an = 'idle';
+      return;
+    }
+    if (!this.staffIdle(rt, dt)) return;
+    const job = this.findPriceJob(rt, s);
+    if (!job) { rt.msg = null; return; }
+    if (this.goto(rt, job.ax, job.az)) { rt.st = 'topr'; rt.fid = job.f.id; rt.pj = job; rt.msg = null; }
+  }
+  // 値段がずれている商品・カードのうち、いちばん近い所（ほかの値段係が向かっている物はのぞく）
+  findPriceJob(rt, me) {
+    const st = this.store, taken = new Set();
+    for (const o of st.staff) { if (o === me) continue; const j = this.dyn.staffRt[o.id]?.pj; if (j) taken.add(j.key); }
+    let best = null, bd = 1e9;
+    const consider = (key, f, ax, az, extra) => { if (taken.has(key)) return; const d = dist2(rt.x, rt.z, ax, az); if (d < bd) { bd = d; best = { key, f, ax, az, ...extra }; } };
+    for (const f of st.fixtures) {
+      if (f.s) f.s.forEach((sl, si) => { const pid = sl[0]; if (!pid || !PRODUCTS[pid] || getPrice(st, pid) === priceLimit(st, pid)) return; const [ax, az] = slotAccess(f, si); consider('p:' + pid, f, ax, az, { pid }); });
+      if (f.cs) f.cs.forEach((cid, ci) => { if (!cid || !CARDS[cid] || cardPrice(st, cid) === cardLimit(st, cid)) return; const [ax, az] = cardAccess(f, ci); consider('c:' + cid, f, ax, az, { cid }); });
+    }
+    return best;
+  }
   staffJob(s, rt, who) {
-    if (s.role === 'cashier' || s.role === 'stocker') return s.role;
+    if (s.role === 'cashier' || s.role === 'stocker' || s.role === 'pricer') return s.role;
     if (rt.job === 'cashier') return 'cashier';
     if (this.heldBox(who) || (rt.st && rt.st !== 'idle')) return 'stocker'; // 品出しの途中は最後までやる
     const st = this.store;
@@ -1640,7 +1678,7 @@ export class Sim {
     return {
       time: this.store.time,
       c: d.customers.map((c) => [c.id, c.av, +c.x.toFixed(2), +c.z.toFixed(2), +c.ry.toFixed(2), c.an, c.bub || '', c.basket.length, c.basket.slice(0, 8).map((b) => b.p).join(','), c.hold || '', c.sm > 0 ? Math.ceil(c.sm) : 0]),
-      s: this.store.staff.map((s) => { const r = d.staffRt[s.id] || {}; return [s.id, +(r.x || 0).toFixed(2), +(r.z || 0).toFixed(2), +(r.ry || 0).toFixed(2), r.an || 'idle', r.st === 'idle' || !r.st ? r.msg || '' : '']; }),
+      s: this.store.staff.map((s) => { const r = d.staffRt[s.id] || {}; return [s.id, +(r.x || 0).toFixed(2), +(r.z || 0).toFixed(2), +(r.ry || 0).toFixed(2), r.an || 'idle', r.st === 'pricing' ? 'tag' : r.st === 'idle' || !r.st ? r.msg || '' : '']; }),
       r: regs, pt,
       dl: d.deliveries.length,
     };

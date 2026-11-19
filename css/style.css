@@ -834,3 +834,12 @@ div.pstock { display: flex; align-items: baseline; gap: 4px; min-width: 0; max-w
 .ev-head .pc-stats { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin: 2px 0; }
 .ev-head .stat { background: #fff; padding: 5px 8px; } .ev-head .stat .k { font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .ev-head .stat .v { font-size: 15px; }
 @media (max-width: 900px) { .ev-head .pc-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); } .ev-cur b { font-size: 16px; } .ev-ic { font-size: 28px; } }
+/* ---- グッズの絵（絵文字のかわり） ---- */
+canvas.pe.tile.art { display: block; padding: 0; background: radial-gradient(circle at 50% 42%, #ffffff 30%, color-mix(in srgb, var(--pc) 22%, white)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pc) 25%, transparent); }
+.target-info .ti-img.art { height: 54px; width: 54px; border-radius: 10px; background: radial-gradient(circle at 50% 42%, #fff 30%, #e9e4f6); filter: none; }
+@media (max-height: 520px) { .target-info .ti-img.art { height: 40px; width: 40px; } }
+.prow .pe .pthumb, .prow .pe canvas.pe.tile { margin: 0 auto; }
+.ptile canvas.pe.tile.art { width: 62px; height: 62px; border-radius: 14px; }
+.prow2 canvas.pe.tile.art { width: 52px; height: 52px; }
+.reg-item canvas.pe.tile.art { width: 30px; height: 30px; }
+@media (max-height: 520px) { .ptile canvas.pe.tile.art { width: 44px; height: 44px; border-radius: 10px; } .prow2 canvas.pe.tile.art { width: 40px; height: 40px; } }

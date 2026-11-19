@@ -5,7 +5,7 @@ import {
   getWalls, zones, keepClear, expandTargets, fixtureFootprint, marketPrice, marketCost, slotCapacity, slotAccess, rackAccess, checkoutSpot, canPlace,
   STAFF_SLOTS, SPEEDS, staffK, staffSpd, staffWage, slotWage, staffSlotOpen, checkoutLimit, closeTime, xpNeed, productUnlocked, fixtureUnlocked, localToWorld, CELL, TRASH_TYPES, ORDER_MAX_BOXES, SHIPPING_FEE,
   MAX_LEVEL, boxUnits, MANAGER, XP_YEN, xpOf, BUILDING, EMPTY_BOX, EMPTY_BOX_PRICE, boxProd, boxLook, isPack, isBoosterBox, cardAccess, seatSpot, unlocksAt, PLAY_FEE, PLAY_FORMATS, PLAY_FORMAT, playFmtOf, playLimit, fmtUnlocked, playCharge,
-  canOrder, hasLicense, isSpray, SPRAY_ID, staffFav, slotPositions, hasStaffLicense,
+  canOrder, hasLicense, isSpray, SPRAY_ID, staffFav, slotPositions, hasStaffLicense, slotFront,
 } from './data.js';
 import { CARDS, CARDS_LIST, BOX_PACKS, openPack, openBox, cardValue, cardLimit, cardPrice, updateCardMarket, buybackPrice, seriesOfProduct, rarityOrder, isHit, cardRank, baseId } from './cards.js';
 import { NavGrid } from './nav.js';
@@ -1594,7 +1594,7 @@ export class Sim {
       }
       case 'toslot': {
         if (!held) { rt.st = 'idle'; return; }
-        if (stepPath(rt, dt, spd)) { rt.st = 'stocking'; rt.t = 0.3; const f = this.fx(rt.fid); if (f) rt.ry = Math.atan2(...localDir(f, 0, -FIXTURES[f.t].slots[rt.si].side)); }
+        if (stepPath(rt, dt, spd)) { rt.st = 'stocking'; rt.t = 0.3; const f = this.fx(rt.fid); if (f) { const [fx, fz] = slotFront(FIXTURES[f.t].slots[rt.si]); rt.ry = Math.atan2(...localDir(f, -fx, -fz)); } }
         return;
       }
       case 'stocking': {

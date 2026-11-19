@@ -10,6 +10,7 @@ import { toast, h, modal, confirmBox } from './ui.js';
 import { sanitizeAvatar } from './models/character.js';
 
 import { packCanvas, boxCanvas } from './cardart.js';
+import { productCanvas, hasProductArt } from './prodart.js';
 // 段ボールの中身の小さな絵（パック・BOXは絵、ほかはアイコン）
 const _thumbs = new Map();
 function thumbHTML(pid) {
@@ -21,6 +22,11 @@ function thumbHTML(pid) {
     }
     const u = _thumbs.get(pid);
     if (u) return `<img class="ti-img${p.cat === 'box' ? ' box' : ''}" src="${u}" alt="">`;
+  } else if (hasProductArt(pid)) {
+    // グッズ：その商品の絵
+    if (!_thumbs.has(pid)) { _thumbs.set(pid, null); productCanvas(pid, 128, (cv) => { try { _thumbs.set(pid, cv.toDataURL('image/png')); } catch (e) { /* noop */ } }); }
+    const u = _thumbs.get(pid);
+    if (u) return `<img class="ti-img art" src="${u}" alt="">`;
   }
   return `<span class="ti-emo" style="--pc:${p.color}">${p.icon}</span>`;
 }
@@ -585,8 +591,8 @@ export class Game {
       // 値札を狙っている → その商品の値段を変えられる
       const s = f.s[t.ti], sl = def.slots[t.ti], p = PRODUCTS[s[0]], price = getPrice(st, s[0]);
       const [tx, ty, tz] = tagLocal(f.t, sl);
-      A.slot = [f.id, { x: tx, y: ty - 0.045, z: tz, w: 0.15, h: 0.09, d: 0.05 }];
-      A.info = `🏷 <b>${p.icon} ${p.name}</b> の値札<br>売値 <b>${yen(price)}</b>（相場 ${yen(marketPrice(st, s[0]))}・${yen(priceLimit(st, s[0]))}まで売れる）${price > priceLimit(st, s[0]) ? '<br><b style="color:#ff6b81">🚫 高すぎて売れません</b>' : ''}`;
+      A.slot = [f.id, { x: tx, y: ty - 0.045, z: tz, w: 0.15, h: 0.09, d: 0.05, a: sl.a }];
+      A.info = `<div class="ti-row">${thumbHTML(s[0])}<div>🏷 <b>${p.name}</b> の値札<br>売値 <b>${yen(price)}</b>（相場 ${yen(marketPrice(st, s[0]))}・${yen(priceLimit(st, s[0]))}まで売れる）${price > priceLimit(st, s[0]) ? '<br><b style="color:#ff6b81">🚫 高すぎて売れません</b>' : ''}</div></div>`;
       A.act = { label: '値段を変える', icon: '🏷', fn: () => this.ui.openPrice(s[0]) };
       if (s[1] === 0) A.alt = { label: 'ラベル解除', fn: () => this.act({ t: 'clearSlot', fid: f.id, si: t.ti }) };
       return A;
@@ -595,7 +601,7 @@ export class Game {
       A.slot = [f.id, sl];
       if (s[0]) {
         const p = PRODUCTS[s[0]], price = getPrice(st, s[0]);
-        A.info = `<b>${p.icon} ${p.name}</b> ${s[1]}/${slotCapacity(s[0], sl)}<br>売値 ${yen(price)}（相場 ${yen(marketPrice(st, s[0]))}）${price > priceLimit(st, s[0]) ? '<br><b style="color:#ff6b81">🚫 高すぎて売れません</b>' : ''}`;
+        A.info = `<div class="ti-row">${thumbHTML(s[0])}<div><b>${p.name}</b> ${s[1]}/${slotCapacity(s[0], sl)}<br>売値 ${yen(price)}（相場 ${yen(marketPrice(st, s[0]))}）${price > priceLimit(st, s[0]) ? '<br><b style="color:#ff6b81">🚫 高すぎて売れません</b>' : ''}</div></div>`;
         A.hint = '🏷 棚のふちの値札を狙うと値段を変えられます';
         if (s[1] === 0) A.alt = { label: 'ラベル解除', fn: () => this.act({ t: 'clearSlot', fid: f.id, si: t.si }) };
         else if (isPack(s[0])) {
@@ -648,7 +654,8 @@ export class Game {
     const t = crate ? null : this._target();
     if (!crate && this._crateGhost) { this._crateGhost = false; this.R.setGhost(null); }
     const A = crate ? this._crateActions(crate, inp) : this._actions(t);
-    this.R.setHighlight(A.slot ? A.slot[0] : t?.type === 'fixture' ? t.fid : null, A.slot ? (() => { const s = A.slot[1]; return [s.x, s.y, s.z, s.w, s.h ?? 0.35, s.d]; })() : null);
+    // 横向きの枠（コーナーシェルフの横の面）は、ハイライトの幅と奥行きを入れかえる
+    this.R.setHighlight(A.slot ? A.slot[0] : t?.type === 'fixture' ? t.fid : null, A.slot ? (() => { const s = A.slot[1], sw = s.a != null && Math.abs(Math.sin(s.a)) > 0.5; return [s.x, s.y, s.z, sw ? s.d : s.w, s.h ?? 0.35, sw ? s.w : s.d]; })() : null);
     this.input.setLabel('act', A.act?.label || '', !!A.act);
     this.input.setLabel('alt', A.alt?.label || '', !!A.alt);
     this.input.setLabel('box', A.box?.label || '', !!A.box, A.box?.icon || '📦'); this.input.setVisible('box', !!A.box);

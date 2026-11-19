@@ -167,9 +167,9 @@ const GOODS = [
   ['sleeve', 'カードスリーブ（ベーシック）', 'supply', 180, 300, 24, [0.075, 0.105, 0.016], '🃏', '#3a86ff', 1, 'sleeve', 'CardGuard', '65枚入り'],
   ['deckcase', 'デッキケース（レッド）', 'supply', 360, 600, 12, [0.078, 0.102, 0.078], '🗃️', '#e63946', 2, 'deckcase', 'DeckPro', '100枚収納', { stack: 2 }],
   ['sleeveF', 'カードスリーブ（ほのお）', 'supply', 270, 450, 24, [0.075, 0.105, 0.016], '🔥', '#ff6b35', 4, 'sleeve', 'CardGuard', '65枚入り'],
-  ['loader', 'カードローダー', 'supply', 150, 250, 24, [0.08, 0.11, 0.02], '🪟', '#90e0ef', 4, 'loader', 'ClearShield', '25枚入り'],
+  ['loader', 'カードローダー', 'supply', 150, 250, 24, [0.08, 0.11, 0.02], '🪪', '#90e0ef', 4, 'loader', 'ClearShield', '25枚入り'],
   ['deckcaseB', 'デッキケース（ブルー）', 'supply', 540, 900, 12, [0.078, 0.102, 0.078], '🗃️', '#2f6fdf', 6, 'deckcase', 'DeckPro', '100枚収納', { stack: 2 }],
-  ['playmat', 'プレイマット', 'supply', 1500, 2500, 8, [0.075, 0.3, 0.075], '🧻', '#7b2cbf', 6, 'playmat', 'BattleField', '60×35cm', { bx: 'l' }],
+  ['playmat', 'プレイマット', 'supply', 1500, 2500, 8, [0.075, 0.3, 0.075], '🟩', '#7b2cbf', 6, 'playmat', 'BattleField', '60×35cm', { bx: 'l' }],
   ['sleeveW', 'カードスリーブ（みず）', 'supply', 330, 550, 24, [0.075, 0.105, 0.016], '💧', '#1d8fe1', 7, 'sleeve', 'CardGuard', '65枚入り'],
   ['binder', 'コレクションバインダー', 'supply', 1500, 2500, 6, [0.24, 0.3, 0.05], '📒', '#2a9d8f', 9, 'binder', 'CollectBook', '9ポケット×20', { bx: 'l' }],
   ['sleeveG', 'カードスリーブ（くさ）', 'supply', 390, 650, 24, [0.075, 0.105, 0.016], '🍃', '#2a9d48', 10, 'sleeve', 'CardGuard', '65枚入り'],
@@ -200,7 +200,7 @@ const GOODS = [
   // グッズ
   ['figure3', 'ミニフィギュア（ランダム）', 'goods', 480, 800, 24, [0.07, 0.1, 0.07], '🎁', '#ffd166', 7, 'figure', 'ANIMON', '全16種', { art: '2-016' }],
   ['acryl2', 'アクリルキーホルダー', 'goods', 540, 900, 24, [0.06, 0.1, 0.02], '🔖', '#7cdfff', 9, 'badge', 'ANIMON', '全12種', { art: '3-028' }],
-  ['cushion', 'アニモンクッション', 'goods', 1200, 2000, 6, [0.22, 0.12, 0.22], '🛏️', '#ffb3c7', 11, 'plush', 'ANIMON', '40cm', { mon: 'round', bx: 'l' }],
+  ['cushion', 'アニモンクッション', 'goods', 1200, 2000, 6, [0.22, 0.12, 0.22], '🛋️', '#ffb3c7', 11, 'plush', 'ANIMON', '40cm', { mon: 'round', bx: 'l' }],
   ['plush4', 'ケロッタのぬいぐるみ', 'goods', 1680, 2800, 8, [0.15, 0.15, 0.13], '🐸', '#7ed957', 14, 'plush', 'ANIMON', '高さ15cm', { mon: 'frog' }],
   ['mug', 'アニモンマグカップ', 'goods', 1320, 2200, 12, [0.1, 0.1, 0.08], '☕', '#ff7a59', 18, 'mug', 'ANIMON', '350mL'],
   ['tshirt', 'アニモンTシャツ', 'goods', 2700, 4500, 8, [0.22, 0.05, 0.26], '👕', '#3a86ff', 24, 'boardgame', 'ANIMON WEAR', 'M・Lサイズ', { stack: 3, bx: 'l' }],
@@ -257,6 +257,18 @@ export const isBoosterBox = (pid) => /^bx\d$/.test(pid || '');
 export const isSpray = (pid) => pid === 'spray';
 
 // ---------- 設備 ----------
+// コーナーシェルフの枠：前の面（+z向き）と右の面（+x向き。a：枠の向き）に1列ずつ
+function cornerSlots(ys, h) {
+  const out = [];
+  for (const y of ys) out.push({ x: -0.25, y, z: 0.46, w: 0.92, h, d: 0.5, side: 1, kind: 'gen', mult: 2 });
+  for (const y of ys) out.push({ x: 0.46, y, z: -0.25, w: 0.92, h, d: 0.5, side: 1, kind: 'gen', mult: 2, a: Math.PI / 2 });
+  return out;
+}
+// 枠の正面の向き（棚のローカル座標）。a があれば横向きの枠
+export const slotFront = (sl) => (sl.a != null ? [Math.sin(sl.a), Math.cos(sl.a)] : [0, sl.side]);
+export const slotYaw = (sl) => (sl.a != null ? sl.a : sl.side < 0 ? Math.PI : 0);
+// 棚のローカル座標の差 → 枠の座標（u：枠の横方向、v：正面方向）
+const toSlotUV = (sl, dx, dz) => { const a = sl.a, c = Math.cos(a), s = Math.sin(a); return [dx * c - dz * s, dx * s + dz * c]; };
 function shelfSlots(levels, ys, w, d, h, cols, kind = 'gen', sides = [1], depth = 0.5) {
   const out = [];
   for (const side of sides) for (let l = 0; l < levels; l++) for (let c = 0; c < cols; c++) {
@@ -289,6 +301,17 @@ export const FIXTURES = {
     slots: shelfSlots(4, [0.14, 0.55, 0.96, 1.37], 2, 0.42, 0.37, 2, 'gen', [1, -1], 1), desc: '両側から取れる大きな棚（4段×2枠×両面＝16枠）' }),
   bigpshelf: F({ name: 'ビッグパーソナルシェルフ', cat: 'shelf', icon: '🪜', price: 8000, w: 1, d: 0.5, place: 'sales', lv: 23,
     slots: shelfSlots(5, [0.12, 0.5, 0.88, 1.26, 1.64], 1, 0.42, 0.34, 1), desc: '背の高い木の棚（5枠）' }),
+  // 原作の「ボックスシェルフ」：大きな枠に段ボール3箱ぶん入る（mult：1枠に入る箱の数）
+  boxshelf: F({ name: 'ボックスシェルフ', cat: 'shelf', icon: '📦', price: 30000, w: 2, d: 0.7, place: 'sales', lv: 33,
+    slots: shelfSlots(2, [0.12, 0.86], 2, 0.62, 0.66, 2).map((x) => ({ ...x, mult: 3 })), desc: '大きな枠の頑丈な棚。1枠に段ボール3箱ぶん入る（4枠×3箱）' }),
+  hugepshelf: F({ name: 'ヒュージパーソナルシェルフ', cat: 'shelf', icon: '🗃️', price: 15000, w: 1.5, d: 0.5, place: 'sales', lv: 35,
+    slots: shelfSlots(5, [0.12, 0.5, 0.88, 1.26, 1.64], 1.5, 0.42, 0.34, 2), desc: '背の高い大きな木の棚（5段×2枠＝10枠）' }),
+  // 原作の「コーナーシェルフ」：部屋の角に置いて、前と横の2面から取れる。1枠に2箱ぶん入る
+  corner: F({ name: 'コーナーシェルフ', cat: 'shelf', icon: '📐', price: 40000, w: 1.5, d: 1.5, place: 'sales', lv: 42, attract: 0.03,
+    slots: cornerSlots([0.12, 0.52, 0.92, 1.32], 0.36), desc: '部屋の角に置く棚。前と横の2面から取れて、1枠に段ボール2箱ぶん入る（8枠×2箱・回転して角に合わせる）' }),
+  // 原作の「テトラモンシェルフ」→ アニモンシェルフ：小さな枠がたくさん
+  animonshelf: F({ name: 'アニモンシェルフ', cat: 'shelf', icon: '🐾', price: 90000, w: 2, d: 0.45, place: 'sales', lv: 49, attract: 0.06,
+    slots: shelfSlots(6, [0.1, 0.4, 0.7, 1.0, 1.3, 1.6], 2, 0.38, 0.26, 4), desc: 'アニモン公式のディスプレイ棚。小さな枠がたくさん並ぶ（6段×4枠＝24枠・お客さんが増える）' }),
   wide: F({ name: 'ワイドシェルフ', cat: 'shelf', icon: '🛋️', price: 30000, w: 3, d: 1, place: 'sales', lv: 30, attract: 0.06,
     slots: shelfSlots(2, [0.3, 0.72], 3, 0.42, 0.38, 3, 'gen', [1, -1], 1), desc: '腰の高さの大きな棚。見通しがよく、お客さんが増える（12枠）' }),
   // ---- シングルカード販売 ----
@@ -303,7 +326,11 @@ export const FIXTURES = {
     cards: cardGrid(4, 2, -0.45, 0.3, [1.17, 1.43], [-0.07, -0.07], 0), desc: '壁にかける横長の額縁ケース（8枚）' }),
   cardtable: F({ name: 'カードテーブル', cat: 'cardsale', icon: '🃏', price: 4000, w: 1.5, d: 0.75, place: 'sales', lv: 2,
     cards: cardGrid(5, 2, -0.52, 0.26, [0.86, 0.9], [0.17, -0.05], 1.15), desc: 'シングルカードを10枚並べて売るテーブル' }),
-  walldisp: F({ name: '壁掛けディスプレイケース', cat: 'cardsale', icon: '🖼️', price: 5000, w: 1, d: 0.3, place: 'sales', lv: 12,
+  walldisp14: F({ name: '壁掛けディスプレイケース（1×4）', cat: 'cardsale', icon: '🖼️', price: 3500, w: 1.3, d: 0.3, place: 'sales', lv: 10,
+    cards: cardGrid(4, 1, -0.45, 0.3, [1.3], [-0.07], 0), desc: '壁にかける細長い額縁ケース（横に4枚）' }),
+  walldisp66: F({ name: '壁掛けディスプレイケース（6×6）', cat: 'cardsale', icon: '🖼️', price: 45000, w: 2.1, d: 0.3, place: 'sales', lv: 47, attract: 0.05,
+    cards: cardGrid(6, 6, -0.75, 0.3, [0.52, 0.76, 1.0, 1.24, 1.48, 1.72], [-0.07, -0.07, -0.07, -0.07, -0.07, -0.07], 0), desc: '壁いっぱいの大きな額縁ケース（6段×6枚＝36枚・お客さんが増える）' }),
+  walldisp: F({ name: '壁掛けディスプレイケース（2×3）', cat: 'cardsale', icon: '🖼️', price: 5000, w: 1, d: 0.3, place: 'sales', lv: 12,
     cards: cardGrid(3, 2, -0.3, 0.3, [1.17, 1.43], [-0.07, -0.07], 0), desc: '壁にかける額縁のケース（6枚）' }),
   disptable: F({ name: 'カード展示ショーケース', cat: 'cardsale', icon: '💎', price: 12000, w: 2, d: 0.75, place: 'sales', lv: 20,
     cards: cardGrid(8, 2, -0.84, 0.24, [0.86, 0.9], [0.16, -0.06], 1.2), desc: 'ガラスの下に16枚を飾るショーケース' }),
@@ -378,6 +405,7 @@ export function worldToLocal(f, wx, wz) {
 }
 export function slotAccess(f, si) {
   const def = FIXTURES[f.t], s = def.slots[si];
+  if (s.a != null) { const [fx, fz] = slotFront(s); return Math.abs(fx) > 0.5 ? localToWorld(f, Math.sign(fx) * (def.w / 2 + 0.45), s.z) : localToWorld(f, s.x, Math.sign(fz) * (def.d / 2 + 0.45)); }
   return localToWorld(f, s.x, s.side * (def.d / 2 + 0.45));
 }
 export function rackAccess(f, si) {
@@ -409,7 +437,7 @@ export function slotPositions(pid, slot) {
   const key = pid + '|' + slot.key;
   let out = _layoutCache.get(key);
   if (out) return out;
-  const p = PRODUCTS[pid], qty = p.qty;
+  const p = PRODUCTS[pid], qty = p.qty * (slot.mult || 1);
   const pile = slot.pile || slot.kind === 'produce' || slot.kind === 'frozen';
   const G = fitGrid(slot, p.size, pile, p.stack);
   let { C, R, L } = G;
@@ -431,6 +459,7 @@ export function slotPositions(pid, slot) {
       if (l % 2) { lx += gx * 0.25; ly -= G.ph * 0.1; }
     }
     if (slot.kind === 'bakery') yaw += (rnd() - 0.5) * 0.5;
+    if (slot.a != null) { const c = Math.cos(slot.a), s = Math.sin(slot.a); out.push([slot.x + lx * c + lz * s, slot.y + Math.max(0, ly), slot.z - lx * s + lz * c, yaw + slot.a]); continue; }
     out.push([slot.x + lx, slot.y + Math.max(0, ly), slot.z + lz * slot.side, yaw + (slot.side < 0 ? Math.PI : 0)]);
   }
   if (pile) out.sort((a, b) => a[1] - b[1]);
@@ -449,6 +478,14 @@ export function pickSlot(type, lx, ly, lz) {
   (def.slots || []).forEach((s, i) => {
     if (def.slots.some((o) => o.side !== s.side) && Math.sign(lz || 1) !== s.side) return;
     const cy = s.y + s.h / 2;
+    if (s.a != null) {
+      const [u, v] = toSlotUV(s, lx - s.x, lz - s.z);
+      if (v < -s.d / 2 - 0.05) return; // 枠のうしろ側
+      const d = u * u + (ly - cy) ** 2 * 2.2 + v * v * 0.3;
+      if (d < bd) { bd = d; best = i; }
+      return;
+    }
+    if (def.slots.some((o) => o.a != null) && lz < s.z - s.d / 2 - 0.05) return;
     const d = (lx - s.x) ** 2 * 1.0 + (ly - cy) ** 2 * 2.2 + (lz - s.z) ** 2 * 0.3;
     if (d < bd) { bd = d; best = i; }
   });
@@ -456,6 +493,7 @@ export function pickSlot(type, lx, ly, lz) {
 }
 // 値札の位置（棚のローカル座標）。描画と「値札を狙う」判定で共通
 export function tagLocal(type, sl) {
+  if (sl.a != null) { const [fx, fz] = slotFront(sl), o = sl.d / 2 + 0.024; return [sl.x + fx * o, sl.y - 0.04, sl.z + fz * o]; }
   let tx = sl.x, ty = sl.y - 0.04, tz = sl.z + sl.side * (sl.d / 2 + 0.024);
   if (type === 'freezer') { ty = 0.72; tz = 0.506; }
   if (type === 'produce') { ty = sl.y + 0.02; tz = sl.z + sl.d / 2 + 0.045; }
@@ -472,7 +510,8 @@ export function pickTag(f, lx, ly, lz) {
     if (!f.s[i]?.[0]) return;
     if (two && Math.sign(lz || 1) !== sl.side) return;
     const [tx, ty, tz] = tagLocal(f.t, sl);
-    const dx = Math.abs(lx - tx), dy = Math.abs(ly - ty), dz = Math.abs(lz - tz);
+    let dx = Math.abs(lx - tx), dy = Math.abs(ly - ty), dz = Math.abs(lz - tz);
+    if (sl.a != null) { const [u, v] = toSlotUV(sl, lx - tx, lz - tz); dx = Math.abs(u); dz = Math.abs(v); }
     if (dx > Math.max(0.1, sl.w * 0.45) || dy > 0.065 || dz > 0.2) return;
     const dd = dx * dx + dy * dy * 4;
     if (dd < bd) { bd = dd; best = i; }

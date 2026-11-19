@@ -5,6 +5,7 @@ import { PRODUCTS, PRODUCTS_LIST, CATEGORIES, FIXTURES, FIXTURE_CATS, STAFF_ROLE
   unlocksAt, checkoutLimit, PLAY_FORMATS, playFmtOf, playLimit, fmtUnlocked, isPack, isBoosterBox } from './data.js';
 import { CARDS, CARDS_LIST, SERIES, SERIES_BY, RARITY, RARITIES, CARD_RATES, FLASH_RATE, FLASH_MULT, PACK_SIZE, BOX_PACKS, cardValue, cardValuePrev, cardPrice, cardLimit, buybackPrice, BUYBACK, rarityOrder, collectionStats, displayedCount, seriesOfProduct, fmtTargetText } from './cards.js';
 import { packCanvas, boxCanvas } from './cardart.js';
+import { productCanvas, hasProductArt } from './prodart.js';
 import { cardEl, cardDetail, packOpening } from './cardui.js';
 import { getPrice, orderCost, orderTotal, priceLimit, customerFactors, repStars } from './sim.js';
 import { yen, fmtTime, mulberry32, escapeText } from './util.js';
@@ -818,7 +819,7 @@ export class GameUI {
       const slots = f.slots ? f.slots.length : 0;
       items.append(h('button', { class: 'bitem' + (sel === id ? ' on' : '') + (ok ? '' : ' locked'), title: f.desc || '', onclick: () => ok ? onPick(id) : toast(`お店 Lv.${f.lv} で買えるようになります`, 'warn') },
         url ? h('img', { class: 'bthumb', src: url, alt: f.name }) : h('span', { class: 'bi' }, f.icon),
-        h('span', { class: 'bn' }, f.name), slots ? h('span', { class: 'bs' }, `${slots}枠`) : f.boxSlots ? h('span', { class: 'bs' }, `${f.boxSlots.length}箱`) : f.cards ? h('span', { class: 'bs' }, `${f.cards.length}枚`) : f.seats ? h('span', { class: 'bs' }, `${f.seats.length}人`) : null,
+        h('span', { class: 'bn' }, f.name), slots ? h('span', { class: 'bs' }, f.slots[0].mult ? `${slots}枠×${f.slots[0].mult}箱` : `${slots}枠`) : f.boxSlots ? h('span', { class: 'bs' }, `${f.boxSlots.length}箱`) : f.cards ? h('span', { class: 'bs' }, `${f.cards.length}枚`) : f.seats ? h('span', { class: 'bs' }, `${f.seats.length}人`) : null,
         h('span', { class: 'bp' }, ok ? yen(f.price) : `🔒 Lv.${f.lv}`)));
     }
     // 見た目の画像はあとから少しずつ作る（できたら差し替え）
@@ -907,7 +908,7 @@ function priceRow(g, st, p, stocked, redraw, big, sm) {
   const nice = (v) => (v >= 1000 ? Math.round(v / 10) * 10 - 20 : Math.round(v / 10) * 10 - 2);
   const e = sm?.get(p.id);
   return h('div', { class: 'prow' + (big ? ' big' : '') },
-    h('div', { class: 'pe' }, p.icon),
+    h('div', { class: 'pe' }, prodThumb(p, true)),
     h('div', { class: 'pinfo' }, h('div', { class: 'pn' }, p.name + (stocked ? '' : ' （未陳列）') + (auto ? ' 🔄' : '')),
       h('div', { class: 'muted small' }, `相場 ${yen(mk)} `, trend(st, p.id), ` ／ 仕入 ${yen(cost)} ／ 利益 ${yen(cur - cost)} ／ 売れる上限 ${yen(lim)}`),
       h('div', { class: 'pmood ' + mood[1] }, mood[0] + (auto ? '（相場に自動で合わせ中）' : ''), e ? h('span', { class: 'pstock inl' }, ` 在庫 ${e.shelf + e.back}（棚${e.shelf}・箱${e.back}）`) : null)),
@@ -933,6 +934,13 @@ function prodThumb(p, small) {
     const c = h('canvas', { class: 'pthumb' + (isBox ? ' box' : '') + (small ? ' sm' : '') }); c.width = W * 2; c.height = H * 2;
     const draw = (src) => { const g2 = c.getContext('2d'); g2.clearRect(0, 0, c.width, c.height); g2.drawImage(src, 0, 0, c.width, c.height); };
     draw(isBox ? boxCanvas(p.series, 'front', 500, 300, draw) : packCanvas(p.series, 300, draw));
+    return c;
+  }
+  // グッズ：その商品の絵（絵文字だと分かりにくいので）
+  if (hasProductArt(p.id)) {
+    const c = h('canvas', { class: 'pe tile art' + (small ? ' sm' : ''), style: { '--pc': p.color || '#8a7bd8' }, title: p.name }); c.width = c.height = 128;
+    const draw = (src) => { const g2 = c.getContext('2d'); g2.clearRect(0, 0, 128, 128); g2.drawImage(src, 0, 0, 128, 128); };
+    draw(productCanvas(p.id, 128, draw));
     return c;
   }
   return h('div', { class: 'pe tile' + (small ? ' sm' : ''), style: { '--pc': p.color || '#8a7bd8' } }, p.icon);

@@ -43,6 +43,7 @@ function boards(g, def, accent, o = {}) {
   // 同じ高さ・同じ面の枠は1枚の棚板にまとめる
   const groups = new Map();
   for (const s of def.slots) {
+    if (s.a != null) continue; // 横向きの枠は下でまとめて作る
     const k = join ? `${s.y}|${s.side}|${s.z}` : s.key;
     const gr = groups.get(k) || { y: s.y, side: s.side, z: s.z, d: s.d, minX: 1e9, maxX: -1e9, xs: [] };
     gr.minX = Math.min(gr.minX, s.x - s.w / 2); gr.maxX = Math.max(gr.maxX, s.x + s.w / 2); gr.xs.push(s.x + s.w / 2 + 0.04);
@@ -60,6 +61,31 @@ function boards(g, def, accent, o = {}) {
     // 枠と枠の間の透明な仕切り板（1枠＝1箱のめやす）
     if (join && !o.noDiv) for (const dx of gr.xs.sort((a, b) => a - b).slice(0, -1)) add(g, T(box(0.006, 0.09, gr.d - 0.02), 0, gr.y, 0), div, dx, 0, gr.z);
   }
+  // 横向きの枠（コーナーシェルフの横の面）：枠の向きに回したグループの中に同じ棚板を作る
+  const rg = new Map();
+  for (const s of def.slots) { if (s.a == null) continue; const k = `${s.y}|${s.a}`; if (!rg.has(k)) rg.set(k, []); rg.get(k).push(s); }
+  for (const list of rg.values()) {
+    const s0 = list[0], c = Math.cos(s0.a), sn = Math.sin(s0.a);
+    const us = list.map((s) => s.x * c - s.z * sn), v = s0.x * sn + s0.z * c; // 枠の座標（u：横、v：正面）
+    const u0 = Math.min(...list.map((s, i) => us[i] - s.w / 2)), u1 = Math.max(...list.map((s, i) => us[i] + s.w / 2));
+    const w = u1 - u0 + 0.04, x = (u0 + u1) / 2, d = s0.d, y = s0.y;
+    const sub = new THREE.Group(); sub.rotation.y = s0.a; g.add(sub);
+    add(sub, T(rbox(w, 0.02, d + 0.03, 0.004), 0, y - 0.02, 0), METAL(), x, 0, v - 0.005);
+    add(sub, T(box(w, 0.05, 0.01), 0, y - 0.065, 0), rail, x, 0, v + d / 2 + 0.012);
+    add(sub, T(box(w, 0.052, 0.004), 0, y - 0.066, 0), cover, x, 0, v + d / 2 + 0.031);
+    add(sub, T(box(w, 0.006, 0.012), 0, y - 0.016, 0), PAINT(accent), x, 0, v + d / 2 + 0.013);
+  }
+}
+// 壁掛けの額縁ケース（カードを立てて飾る）
+function wallCase(w, y0, y1, label) {
+  const g = new THREE.Group(), gold = C(0xc9a227, { r: 0.3, m: 0.75 }), hh = y1 - y0;
+  for (const x of [-w / 2 + 0.03, w / 2 - 0.03]) { add(g, box(0.04, y1 + 0.04, 0.04), DARK(), x, 0, -0.1); add(g, box(0.06, 0.03, 0.3), DARK(), x, 0, 0); }
+  add(g, T(box(w - 0.02, hh, 0.03), 0, y0, -0.1), C(0x1b1d2a, { r: 0.95 }));
+  for (const y of [y0, y1]) add(g, T(box(w + 0.02, 0.03, 0.2), 0, y - 0.015, 0), gold);
+  for (const x of [-w / 2, w / 2]) add(g, T(box(0.03, hh + 0.03, 0.2), x, y0 - 0.015, 0), gold);
+  add(g, T(box(w - 0.02, hh - 0.02, 0.008), 0, y0 + 0.01, 0.095), glassMat());
+  add(g, T(plane(Math.min(0.6, w * 0.4), 0.06), 0, y0 - 0.05), basic(signTexture(label, { w: 512, h: 76, bg: '#c9a227', fg: '#2b1d00', radius: 10 })), 0, 0, 0.1);
+  return g;
 }
 // 壁掛けの黒板（チョーク描き）
 function chalkboard(g, w, h, draw, frame = 0x8b5a2b) {
@@ -444,6 +470,50 @@ const BUILD = {
     return g;
   },
   pshelf(f, ctx) { return woodShelf(FIXTURES.pshelf, 0.5, 1.32, ctx); },
+  hugepshelf(f, ctx) {
+    const g = woodShelf(FIXTURES.hugepshelf, 1.5, 2.02, ctx, true);
+    add(g, T(box(0.03, 1.92, 0.46), 0, 0.1), WOOD()); // まん中の仕切り
+    return g;
+  },
+  boxshelf(f, ctx) {
+    const g = new THREE.Group(), def = FIXTURES.boxshelf, steel = C(0x4a5058, { r: 0.45, m: 0.5 });
+    shelfFrame(g, 2, 0.7, 1.6, ctx.color, 1);
+    add(g, T(box(0.04, 1.48, 0.62), 0, 0.1), steel); // まん中の仕切り（2列）
+    boards(g, def, ctx.color, { w: 2, noDiv: true });
+    // 枠の上の「BOX」プレート
+    for (const x of [-0.5, 0.5]) add(g, T(plane(0.5, 0.08), x, 1.5), basic(signTexture('BOX', { w: 256, h: 64, bg: '#2b2f36', fg: '#ffd84a', emojiL: '📦', radius: 12 })), 0, 0, 0.36);
+    headSign(g, 'BOOSTER BOX', '📦', ctx.color, 1.6, 1.78, -0.3, 1.7);
+    return g;
+  },
+  corner(f, ctx) {
+    // 前（+z）と右（+x）の2面に枠。左奥は芯、右手前の角は柱
+    const g = new THREE.Group(), def = FIXTURES.corner, H = 1.72, white = PAINT(0xf2f3f4);
+    const peg = mat(0xffffff, { map: tex('pegboard'), r: 0.7 });
+    add(g, rbox(1.48, 0.1, 1.48, 0.01), C(0x3d4248, { r: 0.6 }));
+    add(g, T(box(0.94, H - 0.1, 0.94), -0.28, 0.1, -0.28), peg); // 芯（2面の背板を兼ねる）
+    add(g, T(box(0.03, H, 0.54), -0.735, 0, 0.48), white);     // 前の面の左はし
+    add(g, T(box(0.54, H, 0.03), 0.48, 0, -0.735), white);     // 横の面の奥のはし
+    for (const [x, z] of [[-0.735, 0.74], [0.74, -0.735]]) add(g, T(box(0.03, 0.085, 0.03), x, 0.008, z), PAINT(ctx.color));
+    add(g, T(box(0.96, 0.085, 0.012), -0.27, 0.008, 0.745), PAINT(ctx.color)); // 幕板（前）
+    add(g, T(box(0.012, 0.085, 0.96), 0.745, 0.008, -0.27), PAINT(ctx.color)); // 幕板（横）
+    // 角の柱（テーマ色）と見出し
+    add(g, T(rbox(0.52, H + 0.28, 0.52, 0.02), 0.48, 0, 0.48), PAINT(ctx.color));
+    const t = signTexture('CORNER', { w: 512, h: 120, bg: '#ffffff', fg: ctx.color, emojiL: '📐', radius: 20 });
+    const p1 = M(T(plane(0.46, 0.11), 0, H + 0.1), basic(t)); p1.position.set(0.48, 0, 0.741); g.add(p1);
+    const p2 = M(T(plane(0.46, 0.11), 0, H + 0.1), basic(t)); p2.position.set(0.741, 0, 0.48); p2.rotation.y = Math.PI / 2; g.add(p2);
+    add(g, T(rbox(1.5, 0.04, 1.5, 0.01), 0, H), white); // 天板
+    boards(g, def, ctx.color, { perSlot: true });
+    return g;
+  },
+  animonshelf(f, ctx) {
+    const g = new THREE.Group(), def = FIXTURES.animonshelf, warm = PAINT(0xffb347);
+    shelfFrame(g, 2, 0.45, 1.9, ctx.color, 1);
+    for (const x of [-1.005, 1.005]) add(g, T(box(0.02, 1.9, 0.45), x, 0), warm);
+    for (const x of [-0.5, 0, 0.5]) add(g, T(box(0.015, 1.76, 0.38), x, 0.1, 0.02), mat(0xffffff, { r: 0.3, t: true, op: 0.6 }));
+    boards(g, def, ctx.color, { w: 2, noDiv: true });
+    headSign(g, 'ANIMON OFFICIAL', '🐾', '#ff7a59', 1.9, 2.04, -0.18, 1.7);
+    return g;
+  },
   bigpshelf(f, ctx) { return woodShelf(FIXTURES.bigpshelf, 1, 2.02, ctx, true); },
   double(f, ctx) {
     const g = new THREE.Group(), def = FIXTURES.double;
@@ -476,6 +546,8 @@ const BUILD = {
     headSign(g, 'SINGLE CARDS', '🃏', ctx.color, 0.82, 1.22, -0.33, 0.9);
     return g;
   },
+  walldisp14(f, ctx) { void ctx; return wallCase(1.3, 1.14, 1.46, 'SHOWCASE'); },
+  walldisp66(f, ctx) { void ctx; return wallCase(2.1, 0.36, 1.88, 'PREMIUM WALL'); },
   walldisp(f, ctx) {
     const g = new THREE.Group(), gold = C(0xc9a227, { r: 0.3, m: 0.75 });
     for (const x of [-0.47, 0.47]) { add(g, box(0.04, 1.66, 0.04), DARK(), x, 0, -0.1); add(g, box(0.06, 0.03, 0.3), DARK(), x, 0, 0); }

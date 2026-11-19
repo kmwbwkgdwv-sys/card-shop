@@ -1,7 +1,7 @@
 // ===== 描画：店の状態 → 3Dシーン =====
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { FIXTURES, PRODUCTS, BOX_SIZES, boxProd, boxLook, slotPositions, marketPrice, tagLocal, BUILDING } from './data.js';
+import { FIXTURES, PRODUCTS, BOX_SIZES, boxProd, boxLook, slotPositions, marketPrice, tagLocal, slotYaw, BUILDING } from './data.js';
 const SUN_C = [(BUILDING.minX + BUILDING.maxX) / 2 + 2, (BUILDING.minZ + BUILDING.maxZ) / 2 - 1]; // 影を落とす範囲の中心（右の外のトラックも入るよう少し右）
 import { buildFixture, getBeltTex } from './models/fixtures.js';
 import { productParts, productMesh, cardMaterial, cardGeometry } from './models/products.js';
@@ -325,7 +325,7 @@ export class Renderer {
         }
         const price = getPrice(store, p), warn = price > priceLimit(store, p) ? 1 : 0;
         const [tx, ty, tz] = tagLocal(f.t, sl); // 値札（狙うと値段を変えられる）
-        _m.compose(_v.set(tx, ty, tz), _q.setFromAxisAngle(UP, sl.side < 0 ? Math.PI : 0), _s);
+        _m.compose(_v.set(tx, ty, tz), _q.setFromAxisAngle(UP, slotYaw(sl)), _s);
         this.tags.push(`${p}|${price}|${warn}`, _m2.multiplyMatrices(fm, _m), { fid: f.id, si });
       });
     }

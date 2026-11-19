@@ -3,7 +3,7 @@ import {
   PRODUCTS, PRODUCTS_LIST, FIXTURES, STAFF_ROLES, STAFF_NAMES, BOX_SIZES, DELIVERY_AREA,
   OPEN_TIME, GAME_MIN_PER_SEC, SPAWN_POINTS, PLAYER_BOUNDS, START_BAYS, START_STOCK, STAFF_HOME, STOCK_SECTIONS, bayAt, doorOpen, snapFixture,
   getWalls, zones, keepClear, expandTargets, fixtureFootprint, marketPrice, marketCost, slotCapacity, slotAccess, rackAccess, checkoutSpot, canPlace,
-  STAFF_SLOTS, SPEEDS, staffK, staffSpd, staffWage, staffSlotOpen, checkoutLimit, closeTime, xpNeed, productUnlocked, fixtureUnlocked, localToWorld, CELL, TRASH_TYPES, ORDER_MAX_BOXES, SHIPPING_FEE,
+  STAFF_SLOTS, SPEEDS, staffK, staffSpd, staffWage, slotWage, staffSlotOpen, checkoutLimit, closeTime, xpNeed, productUnlocked, fixtureUnlocked, localToWorld, CELL, TRASH_TYPES, ORDER_MAX_BOXES, SHIPPING_FEE,
   MAX_LEVEL, boxUnits, MANAGER, XP_YEN, BUILDING, EMPTY_BOX, EMPTY_BOX_PRICE, boxProd, boxLook, isPack, isBoosterBox, cardAccess, seatSpot, unlocksAt, PLAY_FEE, PLAY_FEE_MAX,
   canOrder, hasLicense, isSpray, SPRAY_ID, staffFav, slotPositions, hasStaffLicense,
 } from './data.js';
@@ -93,7 +93,7 @@ export function normalizeStore(st) {
     if (!s.reg || !s.stk) { s.reg = sl?.reg || s.spd || 1; s.stk = sl?.stk || s.spd || 1; }
     delete s.spd; delete s.fav;
     if (!STAFF_ROLES[s.role]) s.role = 'both';
-    s.wage = staffWage(s.reg, s.stk);
+    s.wage = s.slot ? slotWage(s.slot) : staffWage(s.reg, s.stk);
   }
   for (const [k, n] of Object.entries(st.cards)) if (!CARDS[k] || !(n > 0)) delete st.cards[k]; else st.dex[baseId(k)] = 1;
   for (const k of Object.keys(st.dex)) if (!CARDS[k] || CARDS[k].flash) delete st.dex[k];
@@ -531,7 +531,7 @@ export class Sim {
     if (st.staff.some((o) => o.slot === sl.no)) return this.err(uid, 'その人はもう雇っています');
     const seed = (a.seed >>> 0) || randi(1, 1e9);
     const role = STAFF_ROLES[a.role] ? a.role : 'both';
-    const s = { id: st.nid++, role, reg: sl.reg, stk: sl.stk, name: staffName(a.name) || pick(STAFF_NAMES), seed, slot: sl.no, wage: staffWage(sl.reg, sl.stk) };
+    const s = { id: st.nid++, role, reg: sl.reg, stk: sl.stk, name: staffName(a.name) || pick(STAFF_NAMES), seed, slot: sl.no, wage: sl.wage };
     st.staff.push(s);
     this.toast(null, `${s.name}さんを雇いました！（🧾レジ：${SPEEDS[s.reg].name}・📦品出し：${SPEEDS[s.stk].name}・日給 ¥${s.wage.toLocaleString()}）`, 'ok');
     this.sfx('bell'); this.bump();
@@ -626,6 +626,8 @@ export class Sim {
   a_openPack(uid, a = {}) {
     const b = this.heldBox(uid);
     if (!b || b.n <= 0) return;
+    // 段ボールから直接は開封できない（手に持ってから）
+    if (!a.direct) return this.err(uid, '段ボールを床に置いて開け、パックやBOXを「手に持つ」てから開封しよう');
     const sid = seriesOfProduct(b.p); if (!sid) return;
     if (!b.o) return this.err(uid, '段ボールを開けてから開封しよう');
     if (isPack(b.p)) {
@@ -822,7 +824,7 @@ export class Sim {
     else this.store.cprices[a.cid] = clamp(Math.round(+a.v || 0), 1, 9999999);
     this.bump();
   }
-  // カード買取業者に売る（相場の30%）
+  // カード買取業者に売る（相場の12%）
   a_cardSell(uid, a) {
     const st = this.store, cid = a.cid, n = Math.min(st.cards[cid] || 0, Math.max(1, a.n | 0));
     if (!CARDS[cid] || n <= 0) return;
@@ -968,6 +970,7 @@ export class Sim {
     for (const f of st.fixtures) if (f.s) f.s.forEach((s) => { if (s[0]) stocked.set(s[0], (stocked.get(s[0]) || 0) + 1); });
     const unlocked = PRODUCTS_LIST.filter((p) => canOrder(st, p.id)).map((p) => p.id);
     const hasCards = st.fixtures.some((f) => f.cs && f.cs.some(Boolean));
+    const topPack = Math.max(150, ...PRODUCTS_LIST.filter((p) => p.cat === 'pack' && canOrder(st, p.id)).map((p) => p.price));
     const hasPlay = st.fixtures.some((f) => FIXTURES[f.t].seats);
     const r = Math.random();
     const kind = hasCards && r < 0.3 ? 'collector' : hasPlay && r < 0.5 ? 'gamer' : 'shopper';
@@ -992,7 +995,8 @@ export class Sim {
       miss: [], pricey: [], cheap: [], qT: 0,
       cw: kind === 'collector' ? randi(1, 2 + Math.floor(st.level / 15)) : 0,
       // 予算：ふつうは数百〜数千円。ときどき高いレアカードを探しに来るコレクター（予算8倍）も来る
-      budget: kind === 'collector' ? Math.round(Math.exp(rand(Math.log(200), Math.log(4000 + st.level * 2000))) * (Math.random() < 0.12 ? 8 : 1)) : 0,
+      // 予算：お店で扱っているいちばん高いパックに合わせて大きくなる（高い弾のレアカードも売れるように）。ときどきお金持ちのコレクター（予算10倍）も来る
+      budget: kind === 'collector' ? Math.round(Math.exp(rand(Math.log(2 * topPack), Math.log(40 * topPack + st.level * 2000))) * (Math.random() < 0.15 ? 10 : 1)) : 0,
       wantPlay: kind === 'gamer',
       // 臭いお客さん（臭い10。消臭スプレー2回、オートセント G500 以上なら1回で消える）
       sm: Math.random() < smellRate(st.level) ? 10 : 0,
@@ -1089,8 +1093,11 @@ export class Sim {
   // 並んでいるカードから1枚えらぶ（レアほど見てしまう）。高すぎたら買わない
   chooseCard(c, f) {
     const st = this.store;
-    const cand = f.cs.map((cid, i) => [cid, i]).filter(([cid]) => cid);
+    let cand = f.cs.map((cid, i) => [cid, i]).filter(([cid]) => cid);
     if (!cand.length) return null;
+    // 予算で買えるカードを中心に見る（ときどき高いカードにも目がいく）
+    const ok = cand.filter(([cid]) => cardPrice(st, cid) <= c.budget);
+    if (ok.length && Math.random() < 0.75) cand = ok;
     let tot = 0; const w = cand.map(([cid]) => { const v = Math.pow(cardValue(st, cid) + 20, 0.35); tot += v; return v; });
     let x = Math.random() * tot;
     for (let k = 0; k < cand.length; k++) { x -= w[k]; if (x <= 0) return cand[k]; }

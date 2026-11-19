@@ -119,7 +119,7 @@ Object.assign(B, {
     P.push({ g: box(w, 0.012, d), m: C(p.color, { r: 0.5 }) });
     P.push({ g: T(box(w, 0.03, d), 0, h - 0.03), m: L(p, 'front') });
     P.push({ g: T(plane(w - 0.01, h - 0.045), 0, (h - 0.03) / 2, d / 2), m: mat(0xffffff, { r: 0.05, t: true, op: 0.18 }) });
-    const art = p.id === 'figure2' ? '8-030' : '1-014';
+    const art = p.art || (p.id === 'figure2' ? '8-030' : '1-014');
     const ct = liveTex('fig' + art, (upd) => cardCanvas(art, 128, upd));
     P.push({ g: T(plane(w * 0.75, h * 0.62), 0, 0.015 + h * 0.31, 0), m: foilMat('fig' + art, ct, { at: 0.5 }) });
   },
@@ -128,6 +128,14 @@ Object.assign(B, {
     const [w, h, d] = p.size, mon = p.mon || 'chupi';
     const fur = C(p.color, { r: 0.97 }), belly = C(0xfff7ea, { r: 0.97 }), eye = C(0x1d1d24, { r: 0.25 }), blush = C(0xff9fb2, { r: 0.9 });
     const R = Math.min(w, d) * 0.5;
+    if (mon === 'round') { // クッション：平たい丸に顔
+      P.push({ g: T(sph(R, 18, 12), 0, h * 0.5, 0, 0, 0, 0, 1, (h * 0.5) / R, 1), m: fur });
+      for (const sx of [-1, 1]) {
+        P.push({ g: T(sph(R * 0.08, 8, 6), sx * R * 0.3, h * 0.62, R * 0.86, 0, 0, 0, 1, 1.2, 0.4), m: eye });
+        P.push({ g: T(sph(R * 0.1, 8, 6), sx * R * 0.5, h * 0.48, R * 0.8, 0, 0, 0, 1, 0.6, 0.3), m: blush });
+      }
+      return;
+    }
     P.push({ g: T(sph(R * 0.86, 16, 12), 0, R * 0.8, 0, 0, 0, 0, 1, 0.92, 0.9), m: fur });
     P.push({ g: T(sph(R * 0.5, 12, 10), 0, R * 0.7, R * 0.42, 0, 0, 0, 1, 1.05, 0.5), m: belly });
     const hy = R * 1.55, hr = R * 0.72;
@@ -142,6 +150,12 @@ Object.assign(B, {
     }
     if (mon === 'chupi') { P.push({ g: T(cone(hr * 0.22, hr * 0.4, 8), 0, hy - hr * 0.12, R * 0.05 + hr * 0.92, Math.PI / 2), m: C(0xffa53a, { r: 0.6 }) }); P.push({ g: T(sph(hr * 0.35, 8, 6), 0, hy + hr * 0.95, 0, 0, 0, 0, 0.5, 1.2, 0.8), m: fur }); }
     if (mon === 'sheep') P.push({ g: T(sph(hr * 0.75, 12, 8), 0, hy + hr * 0.55, -hr * 0.1, 0, 0, 0, 1.1, 0.55, 1), m: C(0xffffff, { r: 1 }) });
+    if (mon === 'frog') for (const sx of [-1, 1]) { P.push({ g: T(sph(hr * 0.32, 10, 8), sx * hr * 0.42, hy + hr * 0.7, R * 0.1), m: fur }); P.push({ g: T(sph(hr * 0.16, 8, 6), sx * hr * 0.42, hy + hr * 0.78, R * 0.1 + hr * 0.26), m: eye }); }
+    if (mon === 'dragon') {
+      for (const sx of [-1, 1]) { P.push({ g: T(cone(hr * 0.12, hr * 0.5, 8), sx * hr * 0.35, hy + hr * 0.75, 0, -0.3, 0, sx * -0.25), m: C(0xfff3c4, { r: 0.6 }) }); P.push({ g: T(sph(R * 0.38, 10, 6), sx * R * 0.65, R * 1.15, -R * 0.45, 0, 0, sx * 0.5, 1.2, 0.2, 0.8), m: C(0xffc145, { r: 0.8 }) }); }
+      P.push({ g: T(cone(R * 0.22, R * 0.9, 10), 0, R * 0.4, -R * 0.75, -1.3), m: fur });
+    }
+
     // タグ
     P.push({ g: T(box(0.03, 0.04, 0.003), R * 0.7, R * 0.4, R * 0.6, 0, 0.5), m: L(p, 'front') });
   },
@@ -149,7 +163,7 @@ Object.assign(B, {
   badge: (p, P) => {
     const [w, h, d] = p.size;
     P.push({ g: T(box(w, h, 0.004), 0, 0, 0), m: L(p, 'front') });
-    const t = liveTex('badge' + p.id, (upd) => cardCanvas(p.id === 'badge' ? '1-028' : '2-030', 128, upd));
+    const t = liveTex('badge' + p.id, (upd) => cardCanvas(p.art || (p.id === 'badge' ? '1-028' : '2-030'), 128, upd));
     P.push({ g: T(cyl(w * 0.36, w * 0.36, 0.008, 20), 0, h * 0.42, 0.006, Math.PI / 2), m: foilMat('badgeM' + p.id, t, { r: 0.2, m: 0.3 }) });
     P.push({ g: T(new THREE.CylinderGeometry(w * 0.38, w * 0.38, d * 0.5, 20, 1, true), 0, h * 0.42, 0.006, Math.PI / 2), m: mat(0xffffff, { r: 0.05, t: true, op: 0.3 }) });
   },
@@ -174,10 +188,28 @@ Object.assign(B, {
   manga: (p, P) => {
     const [w, h, d] = p.size;
     P.push({ g: box(w, h, d), m: C(0xf4efe3, { r: 0.9 }) });
-    const t = liveTex('manga', (upd) => cardCanvas('7-029', 128, upd));
-    P.push({ g: T(plane(w * 0.98, h * 0.98), 0, h / 2, d / 2 + 0.001), m: foilMat('mangaM', t) });
+    const art = p.art || '7-029';
+    const t = liveTex('manga' + art, (upd) => cardCanvas(art, 128, upd));
+    P.push({ g: T(plane(w * 0.98, h * 0.98), 0, h / 2, d / 2 + 0.001), m: foilMat('mangaM' + art, t) });
     P.push({ g: T(plane(w * 0.98, h * 0.22), 0, h * 0.86, d / 2 + 0.0015), m: L(p, 'front') });
     P.push({ g: T(plane(d, h), -w / 2 - 0.001, h / 2, 0, 0, -Math.PI / 2), m: C(p.color, { r: 0.5 }) });
+  },
+  // マグカップ：白いカップに色の帯と取っ手
+  mug: (p, P) => {
+    const [w, h] = p.size, r = w * 0.4;
+    P.push({ g: cyl(r, r * 0.92, h, 20), m: C(0xfafafa, { r: 0.25 }) });
+    P.push({ g: T(cyl(r * 1.01, r * 0.95, h * 0.5, 20, true), 0, h * 0.22), m: L(p, 'wrap') });
+    P.push({ g: T(torus(h * 0.25, h * 0.05, 8, 14, Math.PI), r * 1.02, h * 0.5, 0, 0, 0, -Math.PI / 2), m: C(0xfafafa, { r: 0.25 }) });
+    P.push({ g: T(cyl(r * 0.88, r * 0.88, 0.004, 18), 0, h - 0.006), m: C(0x5a3a22, { r: 0.3 }) });
+  },
+  // デッキ（スターター・デラックス）：カードの絵が見える箱
+  deckbox: (p, P) => {
+    const [w, h, d] = p.size, art = p.art || '1-031';
+    P.push({ g: box(w, h, d), m: C(p.color, { r: 0.4, m: 0.2 }) });
+    const t = liveTex('deck' + art, (upd) => cardCanvas(art, 128, upd));
+    P.push({ g: T(plane(w * 0.7, h * 0.7), 0, h * 0.42, d / 2 + 0.001), m: foilMat('deckM' + art, t) });
+    P.push({ g: T(plane(w * 0.96, h * 0.18), 0, h * 0.88, d / 2 + 0.0015), m: L(p, 'front') });
+    P.push({ g: T(box(w * 1.02, h * 0.04, d * 1.02), 0, h * 0.04), m: C(0xd4af37, { r: 0.3, m: 0.7 }) });
   },
   // ボードゲーム：平たい箱（ふたに絵）
   boardgame: (p, P) => {

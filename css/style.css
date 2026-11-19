@@ -771,3 +771,41 @@ div.pstock { display: flex; align-items: baseline; gap: 4px; min-width: 0; max-w
 .reg-item .tcard { --w: 24px; }
 .reg-item .ri-e { font-size: 18px; text-align: center; }
 @media (max-height: 520px) { .reg-items { max-height: 28vh; } .reg-items.small { max-height: 14vh; } .reg-item { font-size: 11px; padding: 2px 5px; } }
+/* 狙っている段ボールの中身 */
+.target-info .ti-row { display: flex; align-items: center; gap: 8px; text-align: left; }
+.target-info .ti-img { height: 52px; width: auto; filter: drop-shadow(0 2px 3px rgba(0,0,0,.35)); flex: none; }
+.target-info .ti-img.box { height: 38px; }
+.target-info .ti-emo { width: 42px; height: 42px; flex: none; display: grid; place-items: center; font-size: 26px; border-radius: 10px; background: linear-gradient(150deg, color-mix(in srgb, var(--pc) 35%, white), var(--pc)); }
+@media (max-height: 520px) { .target-info .ti-img { height: 40px; } .target-info .ti-img.box { height: 30px; } .target-info .ti-emo { width: 34px; height: 34px; font-size: 20px; } }
+/* 仕入れ・ライセンス：横5列で縦にずらっと並べる */
+.pgrid.ptiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; align-content: start; overflow-y: auto; }
+.ptile { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 3px; background: #fff; border: 2px solid #efecf8; border-radius: 12px; padding: 7px 5px 6px; min-width: 0; }
+.ptile .pthumb { width: 46px; height: auto; border-radius: 4px; filter: drop-shadow(0 2px 3px rgba(0,0,0,.25)); }
+.ptile .pthumb.box { width: 64px; }
+.ptile .pe.tile { width: 46px; height: 46px; font-size: 26px; }
+.ptile .pn { font-weight: 900; font-size: 12.5px; line-height: 1.25; white-space: normal; word-break: break-word; overflow: visible; min-height: 2.5em; display: flex; align-items: center; justify-content: center; }
+.ptile .pm { font-size: 10.5px; font-weight: 700; color: var(--muted); line-height: 1.3; white-space: normal; }
+.ptile .pm.good { color: #0f7a5a; font-weight: 900; }
+.ptile .pbadge { font-size: 10px; margin: 0; }
+.ptile .pstock { justify-content: center; flex-wrap: wrap; font-size: 10.5px; white-space: normal; }
+.ptile .pstock .det { white-space: normal; overflow: visible; }
+.ptile .qtys { width: 100%; margin-top: auto; gap: 3px; }
+.ptile .qtys .qty { justify-content: center; gap: 3px; margin: 0; }
+.ptile .qty .ql { display: flex; flex-direction: column; align-items: flex-end; font-size: 10px; min-width: 0; line-height: 1.1; }
+.ptile .qty button { width: 26px; height: 26px; font-size: 15px; }
+.ptile .qty b { min-width: 14px; font-size: 13px; }
+.ptile .lic-btn { margin-top: auto; min-width: 0; width: 100%; padding: 4px 4px; font-size: 11px; }
+.ptile .lic-btn b { font-size: 12.5px; }
+.ptile .lock { margin-top: auto; display: flex; flex-direction: column; align-items: center; font-weight: 900; font-size: 11px; color: #8a83a6; }
+.ptile .lock small { font-size: 10px; font-weight: 700; }
+.ptile .lic-have { margin-top: auto; font-size: 11px; }
+.ptile.locked { opacity: .55; filter: grayscale(.5); }
+.ptile.nolic { background: #fffbea; border-color: #ffe08a; }
+.ptile.lic.have { background: #f2fff6; border-color: #bdf0d3; }
+@media (max-height: 520px) {
+  .pgrid.ptiles { gap: 4px; }
+  .ptile { padding: 5px 3px 4px; gap: 2px; }
+  .ptile .pthumb { width: 34px; } .ptile .pthumb.box { width: 48px; } .ptile .pe.tile { width: 34px; height: 34px; font-size: 19px; }
+  .ptile .pn { font-size: 11px; min-height: 2.4em; } .ptile .pm, .ptile .pstock { font-size: 9.5px; }
+  .ptile .qty button { width: 24px; height: 24px; font-size: 14px; }
+}

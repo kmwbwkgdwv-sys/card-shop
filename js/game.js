@@ -8,6 +8,27 @@ import { clamp, yen, dist, angleLerp, lerp } from './util.js';
 import { toast, h, modal, confirmBox } from './ui.js';
 import { sanitizeAvatar } from './models/character.js';
 
+import { packCanvas, boxCanvas } from './cardart.js';
+// 段ボールの中身の小さな絵（パック・BOXは絵、ほかはアイコン）
+const _thumbs = new Map();
+function thumbHTML(pid) {
+  const p = PRODUCTS[pid]; if (!p || p.hidden) return '';
+  if (p.series) {
+    if (!_thumbs.has(pid)) {
+      const set = (cv) => { try { _thumbs.set(pid, cv.toDataURL('image/png')); } catch (e) { /* noop */ } };
+      set(p.cat === 'box' ? boxCanvas(p.series, 'front', 200, 120, set) : packCanvas(p.series, 90, set));
+    }
+    const u = _thumbs.get(pid);
+    if (u) return `<img class="ti-img${p.cat === 'box' ? ' box' : ''}" src="${u}" alt="">`;
+  }
+  return `<span class="ti-emo" style="--pc:${p.color}">${p.icon}</span>`;
+}
+// 段ボールの中身の表示
+function cartonHTML(b, opened) {
+  const p = boxProd(b.p);
+  if (b.n <= 0 || !PRODUCTS[b.p]) return `📦 <b>空の段ボール</b>${opened}`;
+  return `<div class="ti-row">${thumbHTML(b.p)}<div>📦 段ボールの中身${opened}<br><b>${p.name}</b><br>のこり <b>${b.n}</b> / ${p.qty}${p.cat === 'pack' ? 'パック' : p.cat === 'box' ? 'BOX' : '個'}</div></div>`;
+}
 const RAY = new THREE.Raycaster();
 const V2 = new THREE.Vector2();
 const REACH = 2.5;
@@ -358,7 +379,7 @@ export class Game {
     } else if (t?.type === 'box') {
       const b = st.boxes.find((o) => o.id === t.bid);
       if (b) {
-        A.info += `<br>📦 段ボール：${b.n > 0 ? `${boxProd(b.p).icon} ${boxProd(b.p).name} ×${b.n}` : '空'}${b.o ? '（開いている）' : '（閉じている）'}`;
+        A.info += '<br>' + cartonHTML(b, b.o ? '（開いている）' : '（閉じている）');
         if (hd.t === 'packs' && b.o && b.n > 0 && isPack(b.p) && hd.a.length < HAND_MAX) take = { label: '手に持つ', repeat: true, fn: () => this.act({ t: 'handTake', bid: b.id }) };
         if (b.o && (b.n <= 0 || b.p === pid) && b.n < p.qty && !(hd.t === 'spray' && hd.u < 0.999)) put = { label: '段ボールに戻す', repeat: true, fn: () => this.act({ t: 'handBox', bid: b.id }) };
         else if (!b.o && b.loc.t === 'f') A.hint = '段ボールを開けると戻せます';
@@ -434,11 +455,11 @@ export class Game {
     if (held) {
       const p = boxProd(held.p), empty = held.n <= 0;
       A.info = empty ? `📦 <b>空の段ボール</b>${held.o ? '（開いている）' : '（閉じている）'}<br>棚の商品を1種類だけ詰めて運べます（模様替えに）`
-        : `📦 <b>${p.icon} ${p.name}</b> 残り ${held.n}/${p.qty}${held.o ? '（開いている）' : '（閉じている）'}`;
+        : cartonHTML(held, held.o ? '（開いている）' : '（閉じている）');
       A.box = { label: held.o ? '閉じる' : '開ける', fn: () => this.act({ t: 'boxOpen', open: !held.o }) };
-      // カードパック・BOX の箱なら、自分で開封できる（コレクションに入る）
+      // 段ボールから直接は開封できない（床に置いて開けてから「手に持つ」→ 開封）
       const sid = held.n > 0 ? seriesOfProduct(held.p) : 0;
-      const opener = sid ? { label: isPack(held.p) ? '🎴 パックを開封' : '🎁 BOXを開封', fn: () => { if (this.ui.packOpen) return; if (!held.o) this.act({ t: 'boxOpen', open: true }); this.act({ t: 'openPack', ...this.dropPoint() }); } } : null;
+      const opener = null;
       if (t?.type === 'fixture' && t.si != null && t.si >= 0 && empty) {
         // 空の段ボール：どの商品でも詰められる（詰めるとその商品の箱になる）
         const f = t.f, sl = FIXTURES[f.t].slots[t.si], s = f.s[t.si];
@@ -489,7 +510,8 @@ export class Game {
         A.act = held.n === 0 ? { label: 'ゴミ箱に捨てる', fn: () => this.act({ t: 'discard', fid }) } : null; A.hint = held.n ? '空の段ボールだけ捨てられます' : ''; A.alt = drop;
       } else {
         A.act = drop;
-        if (opener) { A.alt = opener; A.hint = isPack(held.p) ? 'パックを開けるとカードがコレクションファイル（📒）に入ります。シングルはカードの棚で売れます' : 'BOXを開けると段ボールは足元に置いて、10パックが手に出てきます'; }
+        if (opener) A.alt = opener;
+        if (sid) A.hint = `${isPack(held.p) ? 'パック' : 'BOX'}を開封するときは、段ボールを床に置いて開け、中身を「手に持つ」てから開封しよう`;
         if (held.n === 0) A.hint = '空の段ボール：棚の商品を詰めて運べます（いらなければゴミ箱🗑️・リサイクル♻️へ）';
       }
       return A;
@@ -498,7 +520,7 @@ export class Game {
     if (t.type === 'box') {
       const b = st.boxes.find((o) => o.id === t.bid); if (!b) return A;
       const p = boxProd(b.p);
-      A.info = b.n > 0 ? `📦 <b>${p.icon} ${p.name}</b> ×${b.n}${b.o ? '（開いている）' : ''}` : `📦 <b>空の段ボール</b>${b.o ? '（開いている）' : ''}<br>どの商品でも1種類だけ詰められます`;
+      A.info = b.n > 0 ? cartonHTML(b, b.o ? '（開いている）' : '') : `📦 <b>空の段ボール</b>${b.o ? '（開いている）' : ''}<br>どの商品でも1種類だけ詰められます`;
       A.act = { label: '拾う', fn: () => this.act({ t: 'pick', bid: b.id }) };
       const holdable = b.n > 0 && (isPack(b.p) || isBoosterBox(b.p) || isSpray(b.p));
       const toggle = { label: b.o ? '閉じる' : '開ける', icon: '📦', fn: () => this.act({ t: 'boxOpen', bid: b.id, open: !b.o }) };
@@ -828,8 +850,8 @@ export class Game {
       ['📦', '段ボールを持って「開ける」（F／📦ボタン）→ 棚を狙って「補充」（長押しで連続）。補充するとその商品の値札がつく'],
       ['🖐', '棚や開けた段ボールのパックは「手に持つ」で最大5パックまで持てて、その場で開封できる。BOXは1つだけ持てる'],
       ['🎁', 'BOXを開けると10パックが出てくる。そのまま開封しても、途中でやめても、手に持ったまま棚に並べてもOK。BOXのまま売ると10パックより高く売れる'],
-      ['🌈', 'レア度は N → R → SR → SSR → HR（レインボー）→ UR（ゴールド）。封入率は1枚ごとの独立判定（UR 0.25%・HR 1%・SSR 4%・SR 7.6%・R 17.35%・N 69.8%）'],
-      ['✨', 'どのレア度にも5%で「フラッシュ（箔付き）」が付く。カードが輝いて、相場は3倍。レアなカードほど高く売れる'],
+      ['🌈', 'レア度は N → R → SR → SSR → HR（レインボー）→ UR（ゴールド）。封入率は1枚ごとの独立判定（UR 0.1%・HR 0.4%・SSR 1.5%・SR 4%・R 14%・N 80%）。レアなものほど出にくい'],
+      ['✨', 'どのレア度にも5%で「フラッシュ（箔付き）」が付く。カードが輝いて、相場は2.5倍。相場はレア度に見合った値段で、高い弾のレアカードほど高く売れる'],
       ['📒', '出たカードは📒コレクションファイル（Cキー・画面上の📒）に入る。9ポケットのページをめくって見られる'],
       ['🃏', 'シングルカード棚やカードテーブルを狙って「カードを置く」→ コレクションファイルから選んで並べると売れる。値段は相場の+20%まで'],
       ['🤢', 'ときどき臭いお客さん（緑のもやもや）が来る。近くのお客さんがイヤがって帰ってしまうので、消臭スプレーを手に持って「シュッ」。2回で臭いが消える'],

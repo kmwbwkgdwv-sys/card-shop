@@ -2,8 +2,8 @@
 import { SERIES, CARDS_LIST, TYPE_JA, TYPE_COLOR } from './carddata.js';
 export { SERIES, CARDS_LIST, TYPE_JA, TYPE_COLOR };
 
-// フラッシュ（箔付き）：どのレア度にも5%で付く。カードが輝き、相場は約3倍。カードID の後ろに f をつけて区別する（例 1-001f）
-export const FLASH_RATE = 5, FLASH_MULT = 3;
+// フラッシュ（箔付き）：どのレア度にも5%で付く。カードが輝き、相場は2.5倍。カードID の後ろに f をつけて区別する（例 1-001f）
+export const FLASH_RATE = 5, FLASH_MULT = 2.5; // フラッシュは2.5倍（1つ上のレア度より高くはならない）
 export const CARDS = Object.fromEntries(CARDS_LIST.flatMap((c) => [[c.id, c], [c.id + 'f', { ...c, id: c.id + 'f', base: c.id, flash: true, v: c.v * FLASH_MULT }]]));
 export const baseId = (k) => CARDS[k]?.base || k;
 export const isFlash = (k) => !!CARDS[k]?.flash;
@@ -26,7 +26,7 @@ export const cardRank = (cid) => rarityOrder(CARDS[cid]?.r) * 2 + (isFlash(cid) 
 // 1パック5枚。封入率は「1枚ごとの独立判定」（%）
 export const PACK_SIZE = 5;
 export const BOX_PACKS = 10; // 1BOX＝10パック
-export const CARD_RATES = [['N', 69.8], ['R', 17.35], ['SR', 7.6], ['SSR', 4.0], ['HR', 1.0], ['UR', 0.25]];
+export const CARD_RATES = [['N', 80.0], ['R', 14.0], ['SR', 4.0], ['SSR', 1.5], ['HR', 0.4], ['UR', 0.1]]; // レアほど出にくく（合計100%）
 
 const _bySR = new Map();
 export function seriesCards(sid, r) {
@@ -67,12 +67,15 @@ export function roundYen(v) {
   return Math.max(10, Math.round(v / 5) * 5);
 }
 // フラッシュは元のカードの相場 × FLASH_MULT
-export function cardValue(store, cid) { const c = CARDS[cid]; if (!c) return 0; if (c.flash) return roundYen(FLASH_MULT * cardValue(store, c.base)); return roundYen(c.v * (store?.cmk?.[cid] ?? 1)); }
-export function cardValuePrev(store, cid) { const c = CARDS[cid]; if (!c) return null; if (c.flash) { const b = cardValuePrev(store, c.base); return b == null ? null : roundYen(FLASH_MULT * b); } const m = store?.cmkPrev?.[cid]; return m == null ? null : roundYen(c.v * m); }
+// 毎日の相場のゆれ（レア度の順番が入れかわらない幅にとどめる）
+export const CMK_MIN = 0.9, CMK_MAX = 1.12;
+const cmkOf = (m) => Math.min(CMK_MAX, Math.max(CMK_MIN, m ?? 1));
+export function cardValue(store, cid) { const c = CARDS[cid]; if (!c) return 0; if (c.flash) return roundYen(FLASH_MULT * cardValue(store, c.base)); return roundYen(c.v * cmkOf(store?.cmk?.[cid])); }
+export function cardValuePrev(store, cid) { const c = CARDS[cid]; if (!c) return null; if (c.flash) { const b = cardValuePrev(store, c.base); return b == null ? null : roundYen(FLASH_MULT * b); } const m = store?.cmkPrev?.[cid]; return m == null ? null : roundYen(c.v * cmkOf(m)); }
 export const CARD_OK = 1.2; // 相場の+20%までなら買ってもらえる
 export const cardLimit = (store, cid) => Math.floor(cardValue(store, cid) * CARD_OK);
 export const cardPrice = (store, cid) => store?.cprices?.[cid] ?? cardValue(store, cid);
-export const BUYBACK = 0.3; // 業者買取は相場の30%
+export const BUYBACK = 0.12; // 業者買取は相場の12%（まとめて開けて売るだけでは、もうからない）
 export const buybackPrice = (store, cid) => Math.max(1, Math.floor(cardValue(store, cid) * BUYBACK));
 // 毎日の相場変動（平均へゆっくり戻るランダムウォーク）。レアほど大きく動く
 export function updateCardMarket(store, rnd = Math.random) {
@@ -80,9 +83,9 @@ export function updateCardMarket(store, rnd = Math.random) {
   for (const c of CARDS_LIST) {
     const m = store.cmk[c.id] ?? 1;
     store.cmkPrev[c.id] = m;
-    const vol = [0.03, 0.05, 0.08, 0.1, 0.12, 0.12][rarityOrder(c.r)];
+    const vol = [0.02, 0.025, 0.03, 0.035, 0.04, 0.045][rarityOrder(c.r)];
     const g = (rnd() + rnd() + rnd() - 1.5) * vol;
-    store.cmk[c.id] = +Math.min(1.6, Math.max(0.65, 1 + (m - 1) * 0.85 + g)).toFixed(3);
+    store.cmk[c.id] = +Math.min(CMK_MAX, Math.max(CMK_MIN, 1 + (cmkOf(m) - 1) * 0.8 + g)).toFixed(3);
   }
 }
 // コレクション

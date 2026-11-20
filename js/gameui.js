@@ -356,7 +356,7 @@ export class GameUI {
     this.opened(m);
     setTimeout(() => inp.focus(), 60);
   }
-  opened(m) { if (this.open && this.open !== m) { const o = this.open; this.open = null; try { o.close(); } catch (e) { /* noop */ } } this.open = m; this.g.setUIBlock(true); }
+  opened(m) { if (this.open && this.open !== m) { const o = this.open; this.open = null; this._replacing = true; try { o.close(); } catch (e) { /* noop */ } this._replacing = false; } this.open = m; this.g.setUIBlock(true); }
   closed() { this.open = null; this._redraw = null; this._live = null; this.g.setUIBlock(false); }
   // 開いている画面を新しくする（さわっている最中は待つ：ボタンが作り直されて押せなくならないように）。新しくできたら true
   live() {
@@ -365,7 +365,7 @@ export class GameUI {
     if (performance.now() - (this._touchT || 0) < 900) return false;
     this._live(); return true;
   }
-  closeAll() { document.querySelectorAll('.cardview-ov').forEach((x) => x.remove()); if (document.querySelector('.boxopen-ov')) { document.querySelectorAll('.boxopen-ov').forEach((x) => x.remove()); this.packOpen = false; this.g?.setUIBlock(false); } if (this.open) { const o = this.open; this.open = null; o.close(); } }
+  closeAll() { document.querySelectorAll('.cardview-ov').forEach((x) => x.remove()); if (document.querySelector('.boxopen-ov')) { document.querySelectorAll('.boxopen-ov').forEach((x) => x.remove()); this.packOpen = false; this.g?.setUIBlock(false); } if (this.open) { const o = this.open; this.open = null; this._replacing = true; try { o.close(); } finally { this._replacing = false; } } }
 
   // ---------- 店舗拡張ボード ----------
   openExpand() {
@@ -426,7 +426,8 @@ export class GameUI {
   openCollection(opts = {}) {
     const g = this.g, pick = opts.pick || null;
     let sid = pick ? (this._pkSid ?? 0) : (opts.sid || this._bSid || 1), mode = opts.tab === 'market' ? 'market' : opts.tab === 'rates' ? 'rates' : 'cards';
-    let filter = pick ? 'have' : (this._bFilter || 'all'), page = 0, sort = this._pkSort || 'value';
+    const back = () => this.openCollection({ keep: true, tab: this._bMode }); // 値段の画面から戻ってきたとき、同じページを開く
+    let filter = pick ? 'have' : (this._bFilter || 'all'), page = !pick && opts.keep ? this._bPage || 0 : 0, sort = this._pkSort || 'value';
     const body = h('div', { class: 'cfile' + (pick ? ' picking' : '') });
     const tabs = h('div', { class: 'tabs head-tabs' });
     const spread = () => window.innerWidth >= 640 && window.innerWidth > window.innerHeight * 1.05;
@@ -451,7 +452,7 @@ export class GameUI {
     let flipDir = 0;
     const draw = () => {
       const st = g.store;
-      if (!pick) { this._bSid = sid; this._bFilter = filter; } else { this._pkSid = sid; this._pkSort = sort; }
+      if (!pick) { this._bSid = sid; this._bFilter = filter; this._bPage = page; this._bMode = mode; } else { this._pkSid = sid; this._pkSort = sort; }
       tabs.innerHTML = '';
       if (!pick) tabs.append(h('button', { class: 'tab' + (mode === 'cards' ? ' on' : ''), onclick: () => { mode = 'cards'; draw(); } }, '📒 ファイル'),
         h('button', { class: 'tab' + (mode === 'market' ? ' on' : ''), onclick: () => { mode = 'market'; draw(); } }, '📈 相場'),
@@ -471,7 +472,7 @@ export class GameUI {
         body.append(stabs, h('div', { class: 'bhead' }, h('b', {}, `第${se.id}弾「${se.name}」の相場`), h('span', { class: 'muted small' }, '　レアなカードほど高く売れます')),
           h('div', { class: 'bgrid market' }, rows.map((c) => {
             const v = cardValue(st, c.id), pv = cardValuePrev(st, c.id), d = pv ? (v - pv) / pv * 100 : 0, reg = !!st.dex?.[c.id];
-            return h('div', { class: 'mrow', onclick: reg ? () => this.openCardView(c.id, draw) : null },
+            return h('div', { class: 'mrow', onclick: reg ? () => this.openCardView(c.id, draw, back) : null },
               h('span', { class: 'rar r-' + c.r }, c.r), h('span', { class: 'mn' }, reg ? c.name : '？？？'), h('b', {}, yen(v)),
               h('span', { class: 'trend ' + (d > 0.5 ? 'up' : d < -0.5 ? 'down' : 'flat') }, d > 0.5 ? `▲${d.toFixed(0)}%` : d < -0.5 ? `▼${Math.abs(d).toFixed(0)}%` : '→'),
               h('span', { class: 'muted small' }, `手持ち ${st.cards?.[c.id] || 0}${st.cards?.[c.id + 'f'] ? `（✨${st.cards[c.id + 'f']}）` : ''}・✨${yen(cardValue(st, c.id + 'f'))}`));
@@ -499,9 +500,9 @@ export class GameUI {
         if (!e) return h('div', { class: 'cf-pocket empty' });
         if (!e.reg) return h('div', { class: 'cf-pocket missing', style: { '--w': size + 'px' } }, h('div', { class: 'bq' }, '？'), h('div', { class: 'bno' }, `${String(e.c.no).padStart(3, '0')} ${e.c.r}`));
         const show = e.n ? e.c.id : e.nf ? e.c.id + 'f' : e.c.id;
-        const open = async () => { const cid = pick ? await choose(e) : show; if (!cid) return; if (pick) { m.close(); pick(cid); } else this.openCardView(cid, draw); };
+        const open = async () => { const cid = pick ? await choose(e) : show; if (!cid) return; if (pick) { m.close(); pick(cid); } else this.openCardView(cid, draw, back); };
         const el = cardEl(show, { size, count: (e.n || e.nf) ? (e.n || e.nf) : null, dim: !e.n && !e.nf, onClick: open });
-        const fl = e.n && e.nf ? h('button', { class: 'cf-fl', onclick: (ev) => { ev.stopPropagation(); if (pick) { m.close(); pick(e.c.id + 'f'); } else this.openCardView(e.c.id + 'f', draw); } }, `✨×${e.nf}`) : null;
+        const fl = e.n && e.nf ? h('button', { class: 'cf-fl', onclick: (ev) => { ev.stopPropagation(); if (pick) { m.close(); pick(e.c.id + 'f'); } else this.openCardView(e.c.id + 'f', draw, back); } }, `✨×${e.nf}`) : null;
         const shown = displayedCount(st, e.c.id) + displayedCount(st, e.c.id + 'f');
         return h('div', { class: 'cf-pocket', style: { '--w': size + 'px' } }, el, fl, h('div', { class: 'bno' }, `${yen(cardValue(st, show))}${shown ? ` 🃏${shown}` : ''}`));
       };
@@ -545,16 +546,19 @@ export class GameUI {
     g.app.sfx.play('flip', 0.6);
   }
   // カード1枚を大きく見る（値段・買取）
-  openCardView(cid, after) {
+  openCardView(cid, after, back) {
     const g = this.g, st = g.store, c = CARDS[cid];
     const n = st.cards?.[cid] || 0;
     const ov = h('div', { class: 'cardview-ov' });
-    const close = () => { ov.remove(); after?.(); };
+    // ファイルの上に重ねて表示する（「戻る」・まわりをタップ・Escキーで閉じてファイルに戻る）
+    const close = () => { if (!ov.isConnected) return; ov.remove(); window.removeEventListener('keydown', esc, true); after?.(); };
+    const esc = (ev) => { if (ev.key === 'Escape' || ev.key === 'Backspace') { ev.preventDefault(); ev.stopPropagation(); close(); } };
+    window.addEventListener('keydown', esc, true);
     const acts = [
-      h('button', { class: 'btn small', onclick: () => { close(); this.openCardPrice(cid); } }, `🏷 売値 ${yen(cardPrice(st, cid))}`),
+      h('button', { class: 'btn small', onclick: () => { close(); this.openCardPrice(cid, back); } }, `🏷 売値 ${yen(cardPrice(st, cid))}`),
       n > 0 ? h('button', { class: 'btn small ghost', onclick: async () => { if (await confirmBox(`${c.flash ? '✨フラッシュの' : ''}${c.name}（${c.r}）を1枚、買取業者に ${yen(buybackPrice(st, cid))} で売りますか？`, '売る')) { g.act({ t: 'cardSell', cid, n: 1 }); close(); } } }, `💱 買取 ${yen(buybackPrice(st, cid))}`) : null,
       h('span', { class: 'muted small' }, `手持ち ${n}枚・並べている ${displayedCount(st, cid)}枚`),
-      h('button', { class: 'btn small ghost', onclick: close }, '閉じる'),
+      h('button', { class: 'btn small ghost', onclick: close }, '◀ 戻る'),
     ];
     ov.append(cardDetail(st, cid, { actions: acts }));
     ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
@@ -579,7 +583,7 @@ export class GameUI {
     this.opened(m);
   }
   // シングルカードの値段
-  openCardPrice(cid) {
+  openCardPrice(cid, back) {
     const g = this.g, c = CARDS[cid];
     const draw = () => {
       const st = g.store, cur = cardPrice(st, cid), mk = cardValue(st, cid), lim = cardLimit(st, cid), auto = st.cprices?.[cid] == null;
@@ -595,7 +599,8 @@ export class GameUI {
           h('div', { class: 'row wrap' }, h('button', { class: 'btn small' + (auto ? '' : ' ghost'), onclick: () => set('market') }, '🔄 相場に合わせる'),
             [[0.9, '−10%'], [1.1, '+10%'], [1.2, '+20%（上限）']].map(([k, t]) => h('button', { class: 'btn small ghost', onclick: () => set(Math.floor(mk * k)) }, t))))));
     };
-    const m = modal('🏷 シングルの値段', [], { onClose: () => this.closed() });
+    // ファイルから開いたときは、閉じるとファイルに戻る（ほかの画面に切り替わったときは戻らない）
+    const m = modal('🏷 シングルの値段', [], { onClose: () => { this.closed(); if (back && !this._replacing) setTimeout(back, 0); } });
     this.opened(m); draw();
   }
   // 倉庫棚のラベルを選ぶ

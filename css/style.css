@@ -503,7 +503,7 @@ div.pstock { display: flex; align-items: baseline; gap: 4px; min-width: 0; max-w
 .rate-list { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
 .rate-row { display: grid; grid-template-columns: 48px 1fr 70px 1fr; gap: 8px; align-items: center; background: #faf8ff; padding: 8px 10px; border-radius: 10px; font-weight: 800; }
 /* カードを大きく見る */
-.cardview-ov { position: fixed; inset: 0; z-index: 60; background: rgba(12,10,30,.82); display: flex; align-items: center; justify-content: center; padding: 12px; backdrop-filter: blur(3px); }
+.cardview-ov { pointer-events: auto; position: fixed; inset: 0; z-index: auto; background: rgba(12,10,30,.82); display: flex; align-items: center; justify-content: center; padding: 12px; backdrop-filter: blur(3px); }
 .card-detail { display: flex; gap: 22px; align-items: center; max-width: 760px; width: 100%; color: #fff; flex-wrap: wrap; justify-content: center; }
 .cd-info { flex: 1; min-width: 220px; display: flex; flex-direction: column; gap: 8px; background: rgba(255,255,255,.08); border-radius: 16px; padding: 14px; }
 .cd-info .muted { color: #c9c2ea; }
